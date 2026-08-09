@@ -225,36 +225,84 @@ class ReolinkRecordingsCoordinator:
             return False
 
     def _merge_camera_data(self, cached_data: List[Dict[str, Any]], new_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Merge new camera data with cached data, preserving valid cached entries if new one errors."""
-        merged = []
-        new_map = {c.get("camera"): c for c in new_data}
-        cached_map = {c.get("camera"): c for c in cached_data}
+        """Merge new camera data with cached data, preserving valid cached entries if new one errors.
         
-        # Get all unique camera names
-        all_cameras = set(list(new_map.keys()) + list(cached_map.keys()))
+        Deduplicates by slug (lowercase, underscored) to prevent stale entries with
+        different name formats (e.g., 'first_landing' vs 'First Landing') from creating
+        duplicate sensors.
+        """
+        def _slug(name):
+            return name.lower().replace(" ", "_")
         
-        for camera in all_cameras:
-            new_item = new_map.get(camera)
-            cached_item = cached_map.get(camera)
+        merged_by_slug = {}
+        new_by_slug = {}
+        cached_by_slug = {}
+        
+        # Index new data by slug, preferring proper-case names
+        for c in new_data:
+            slug = _slug(c.get("camera", ""))
+            if slug not in new_by_slug or (c.get("error") is None and "error" in new_by_slug[slug]):
+                new_by_slug[slug] = c
+            elif c.get("error") is None and new_by_slug[slug].get("error") is not None:
+                new_by_slug[slug] = c
+            # If both are valid, prefer proper-case name (contains space or mixed case)
+            elif c.get("error") is None and " " in c.get("camera", "") and " " not in new_by_slug[slug].get("camera", ""):
+                new_by_slug[slug] = c
+        
+        # Index cached data by slug, preferring proper-case names
+        for c in cached_data:
+            slug = _slug(c.get("camera", ""))
+            if slug not in cached_by_slug or (c.get("error") is None and "error" in cached_by_slug[slug]):
+                cached_by_slug[slug] = c
+            elif c.get("error") is None and cached_by_slug[slug].get("error") is not None:
+                cached_by_slug[slug] = c
+            # If both are valid, prefer proper-case name (contains space)
+            elif c.get("error") is None and " " in c.get("camera", "") and " " not in cached_by_slug[slug].get("camera", ""):
+                cached_by_slug[slug] = c
+        
+        # Get all unique slugs
+        all_slugs = set(list(new_by_slug.keys()) + list(cached_by_slug.keys()))
+        
+        for slug in all_slugs:
+            new_item = new_by_slug.get(slug)
+            cached_item = cached_by_slug.get(slug)
             
             if new_item and "error" not in new_item:
                 # Valid new data - use it
-                merged.append(new_item)
+                merged_by_slug[slug] = new_item
             elif cached_item and "error" not in cached_item:
                 # New data missing or error, but we have valid cache - use cache
                 if new_item:
-                    _LOGGER.warning(f"Camera {camera} is offline/error ({new_item.get('error')}). Using cached data.")
+                    _LOGGER.warning(f"Camera {slug} is offline/error ({new_item.get('error')}). Using cached data.")
                 else:
-                    _LOGGER.info(f"Camera {camera} not found in current scan. Using cached data.")
-                merged.append(cached_item)
+                    _LOGGER.info(f"Camera {slug} not found in current scan. Using cached data.")
+                merged_by_slug[slug] = cached_item
                 
                 # Ensure paths are populated for this cached item
                 self._ensure_paths_for_camera(cached_item)
             elif new_item:
                  # Only have errored new data
-                 merged.append(new_item)
+                 merged_by_slug[slug] = new_item
         
-        return merged
+        # Normalize camera names: ensure consistent proper-case across all entries
+        # Converts snake_case (e.g., "first_landing" -> "First Landing")
+        # and fixes inconsistent casing (e.g., "Front door" -> "Front Door")
+        for slug, item in merged_by_slug.items():
+            camera_name = item.get("camera", "")
+            if not camera_name:
+                continue
+            # Convert snake_case to proper name
+            if "_" in camera_name and " " not in camera_name:
+                proper_name = camera_name.replace("_", " ").title()
+                _LOGGER.info(f"Normalizing camera name from '{camera_name}' to '{proper_name}'")
+                merged_by_slug[slug] = {**item, "camera": proper_name}
+            # Fix inconsistent casing (e.g., "Front door" -> "Front Door")
+            elif " " in camera_name and camera_name != camera_name.title():
+                proper_name = camera_name.title()
+                _LOGGER.info(f"Normalizing camera name from '{camera_name}' to '{proper_name}'")
+                merged_by_slug[slug] = {**item, "camera": proper_name}
+        
+        return list(merged_by_slug.values())
 
     def _ensure_paths_for_camera(self, camera_data: Dict[str, Any]):
         """Ensure recording_paths are populated for a camera data item."""
@@ -309,8 +357,10 @@ class ReolinkRecordingsCoordinator:
                     stat = file_path.stat()
                     mod_time = datetime.fromtimestamp(stat.st_mtime)
                     
+                    # Proper title case: "first landing" -> "First Landing" (not "First_Landing")
+                    camera_title = " ".join(word.capitalize() for word in name_part.split())
                     restored_data = {
-                        "camera": name_part.title(), # Best guess formatting
+                        "camera": camera_title,
                         "timestamp": mod_time.strftime("%H:%M:%S"),
                         "date": mod_time.strftime("%Y/%m/%d"),
                         "event_type": "Restored file",
@@ -366,9 +416,17 @@ class ReolinkRecordingsCoordinator:
                 _LOGGER.warning(f"Error extracting camera index for {camera_name}: {str(e)}")
         
         # Update our persistent camera mapping with the actual indices
+        # Normalize camera names to proper title case for consistency
         self.camera_index_map.clear()
         for camera_name, camera_index in camera_name_to_index.items():
-            self.camera_index_map[camera_index] = camera_name
+            # Convert snake_case to proper name and fix inconsistent casing
+            if "_" in camera_name and " " not in camera_name:
+                proper_name = camera_name.replace("_", " ").title()
+            elif " " in camera_name and camera_name != camera_name.title():
+                proper_name = camera_name.title()
+            else:
+                proper_name = camera_name
+            self.camera_index_map[camera_index] = proper_name
             
         _LOGGER.info(f"Camera mapping complete: {self.camera_index_map}")
         _LOGGER.info(f"NVR ID mapping complete: {self.camera_nvr_map}")
@@ -926,9 +984,50 @@ class ReolinkRecordingsCoordinator:
         """Save metadata about the recordings."""
         metadata_file = self.metadata_dir / "recordings.json"
         
+        # Deduplicate cameras by slug before saving to prevent stale entries
+        cameras = self.data.get("cameras", [])
+        deduped_cameras = []
+        seen_slugs = {}
+        for cam in cameras:
+            slug = cam.get("camera", "").lower().replace(" ", "_")
+            if slug not in seen_slugs:
+                seen_slugs[slug] = cam
+                deduped_cameras.append(cam)
+            else:
+                # Keep the proper-case name and most recent date
+                existing = seen_slugs[slug]
+                existing_has_space = " " in existing.get("camera", "")
+                new_has_space = " " in cam.get("camera", "")
+                if new_has_space and not existing_has_space:
+                    # New one has proper case, old one is lowercase - prefer new
+                    deduped_cameras.remove(existing)
+                    seen_slugs[slug] = cam
+                    deduped_cameras.append(cam)
+                elif existing_has_space and not new_has_space:
+                    # Existing is proper case, new is lowercase - keep existing
+                    pass
+                else:
+                    # Both same case, prefer the one with newer date
+                    existing_date = existing.get("date", "0/0/0")
+                    new_date = cam.get("date", "0/0/0")
+                    try:
+                        ep = existing_date.split("/")
+                        np = new_date.split("/")
+                        existing_tuple = (int(ep[0]), int(ep[1]), int(ep[2]))
+                        new_tuple = (int(np[0]), int(np[1]), int(np[2]))
+                        if new_tuple > existing_tuple:
+                            deduped_cameras.remove(existing)
+                            seen_slugs[slug] = cam
+                            deduped_cameras.append(cam)
+                    except (ValueError, IndexError):
+                        pass
+        
+        clean_data = dict(self.data)
+        clean_data["cameras"] = deduped_cameras
+        
         metadata = {
-            "last_update": self.data.get("last_update"),
-            "data": self.data, # Save the entire data structure including cameras list
+            "last_update": clean_data.get("last_update"),
+            "data": clean_data, # Save deduplicated data structure
             "recordings": self.recording_paths,
             "recording_cache": self.recording_cache,
             "camera_index_map": self.camera_index_map, # Also persist the mapping

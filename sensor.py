@@ -1,7 +1,7 @@
 """Sensor platform for Reolink Recordings."""
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from homeassistant.components.sensor import SensorEntity
@@ -10,6 +10,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 from .const import (
     DOMAIN,
@@ -39,16 +44,21 @@ async def async_setup_entry(
     entities = []
     # Add a sensor for each camera once data is available
     if coordinator.data and "cameras" in coordinator.data:
+        # Deduplicate cameras by slug to avoid creating duplicate sensors
+        seen_slugs = set()
         for camera_data in coordinator.data["cameras"]:
             camera_name = camera_data["camera"]
             if "error" not in camera_data:
-                entities.append(
-                    ReolinkRecordingSensor(
-                        coordinator,
-                        camera_name,
-                        config_entry.entry_id,
+                slug = camera_name.lower().replace(" ", "_")
+                if slug not in seen_slugs:
+                    seen_slugs.add(slug)
+                    entities.append(
+                        ReolinkRecordingSensor(
+                            coordinator,
+                            camera_name,
+                            config_entry.entry_id,
+                        )
                     )
-                )
     
     async_add_entities(entities)
 
@@ -90,6 +100,43 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
             CONF_SNAPSHOT_FORMAT, DEFAULT_SNAPSHOT_FORMAT
         )
     
+    def _find_camera_data(self) -> Optional[Dict[str, Any]]:
+        """Find the best matching camera data for this sensor.
+        
+        When multiple entries match by slug (e.g., 'first_landing' and 'First Landing'),
+        prefer the one with proper-case name and most recent date.
+        """
+        matches = []
+        for camera_data in self.coordinator.data.get("cameras", []):
+            camera_name = camera_data.get("camera", "")
+            if camera_name == self.camera_name or \
+               camera_name.lower() == self.camera_name.lower():
+                if "error" not in camera_data:
+                    matches.append(camera_data)
+        
+        if not matches:
+            return None
+        
+        if len(matches) == 1:
+            return matches[0]
+        
+        # Prefer proper-case name (contains space) over lowercase slug
+        proper_case = [m for m in matches if " " in m.get("camera", "")]
+        if proper_case:
+            matches = proper_case
+        
+        # Among remaining matches, prefer the one with the most recent date
+        def _sort_key(m):
+            date_str = m.get("date", "0/0/0")
+            try:
+                parts = date_str.split("/")
+                return (int(parts[0]), int(parts[1]), int(parts[2]))
+            except (ValueError, IndexError):
+                return (0, 0, 0)
+        
+        matches.sort(key=_sort_key, reverse=True)
+        return matches[0]
+
     @property
     def available(self) -> bool:
         """Always available if we have a path for the latest recording."""
@@ -98,24 +145,70 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         # Case-insensitive fallback
         return any(k.lower() == self.camera_name.lower() for k in self.coordinator.recording_paths)
     
+    def _get_corrected_timestamp(self, camera_data: Dict[str, Any]) -> tuple:
+        """Return (date, timestamp) using file mtime if the API timestamp is stale.
+        
+        The Reolink NVR API can lag behind the actual recording file on disk.
+        If the file mtime is more than 2 minutes newer than the API timestamp,
+        we use the file mtime instead.
+        """
+        api_date = camera_data.get("date")
+        api_timestamp = camera_data.get("timestamp")
+        
+        if not api_date or not api_timestamp:
+            return (api_date or "Unknown", api_timestamp or "Unknown")
+        
+        # Get the file path - try exact match first, then case-insensitive
+        recording_path = self.coordinator.recording_paths.get(self.camera_name)
+        if not recording_path:
+            for k, v in self.coordinator.recording_paths.items():
+                if k.lower() == self.camera_name.lower():
+                    recording_path = v
+                    break
+        
+        if recording_path:
+            try:
+                # HA runs in UTC internally; convert file mtime to HA's configured
+                # timezone (e.g. America/Edmonton) so the card's _parseRecordingDate
+                # interprets it correctly as local time.
+                tz_str = None
+                if self.coordinator.hass and self.coordinator.hass.config:
+                    tz_str = self.coordinator.hass.config.time_zone
+                if not tz_str:
+                    tz_str = "UTC"
+                tz = ZoneInfo(tz_str)
+                file_mtime = datetime.fromtimestamp(
+                    os.path.getmtime(recording_path), tz=timezone.utc
+                ).astimezone(tz)
+                date_parts = api_date.split("/")
+                time_parts = api_timestamp.split(":")
+                if len(date_parts) == 3 and len(time_parts) == 3:
+                    api_dt = datetime(
+                        int(date_parts[0]), int(date_parts[1]), int(date_parts[2]),
+                        int(time_parts[0]), int(time_parts[1]), int(time_parts[2]),
+                        tzinfo=tz
+                    )
+                    if file_mtime - api_dt > timedelta(minutes=2):
+                        _LOGGER.debug(
+                            "File mtime %s is newer than API timestamp %s for %s, using file mtime",
+                            file_mtime.isoformat(), api_dt.isoformat(), self.camera_name
+                        )
+                        return (file_mtime.strftime("%Y/%m/%d"), file_mtime.strftime("%H:%M:%S"))
+            except (OSError, ValueError, IndexError) as e:
+                _LOGGER.debug("Could not compare file mtime for %s: %s", self.camera_name, e)
+        
+        return (api_date, api_timestamp)
+    
     @property
     def state(self) -> Optional[str]:
         """Return the state of the sensor."""
-        # Find this camera's data
-        for camera_data in self.coordinator.data.get("cameras", []):
-            # Check for name match (case-insensitive)
-            if camera_data["camera"] == self.camera_name or \
-               camera_data["camera"].lower() == self.camera_name.lower():
-                if "error" in camera_data:
-                    return None
-                    
-                # Return timestamp and event type as state
-                timestamp = camera_data.get("timestamp", "Unknown")
-                date = camera_data.get("date", "Unknown")
-                event_type = camera_data.get("event_type", "Unknown")
-                return f"{date} {timestamp} - {event_type}"
-                
-        return None
+        camera_data = self._find_camera_data()
+        if camera_data is None:
+            return None
+        
+        date, timestamp = self._get_corrected_timestamp(camera_data)
+        event_type = camera_data.get("event_type", "Unknown")
+        return f"{date} {timestamp} - {event_type}"
     
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
@@ -124,80 +217,79 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         now = datetime.now()
         timestamp = now.strftime("%s")  # Unix timestamp for cache busting
         
-        # Find this camera's data and recording path
-        for camera_data in self.coordinator.data.get("cameras", []):
-            # Check for name match (case-insensitive)
-            if camera_data["camera"] == self.camera_name or \
-               camera_data["camera"].lower() == self.camera_name.lower():
-                if "error" not in camera_data:
-                    attributes["date"] = camera_data.get("date")
-                    attributes["timestamp"] = camera_data.get("timestamp")
-                    attributes["duration"] = camera_data.get("duration")
-                    attributes["event_type"] = camera_data.get("event_type")
-                    attributes["last_updated"] = now.isoformat()
-                    
-                    # Get the file path - try exact match first, then case-insensitive
-                    recording_path = self.coordinator.recording_paths.get(self.camera_name)
-                    if not recording_path:
-                        for k, v in self.coordinator.recording_paths.items():
-                            if k.lower() == self.camera_name.lower():
-                                recording_path = v
-                                break
-                    
-                    if recording_path:
-                        attributes["file_path"] = recording_path
-                        attributes["file_name"] = self._video_filename
-                        
-                        # Media URL (MP4) for tap-to-play - using /local/ URL via symlink
-                        attributes["media_url"] = f"/local/reolink_recordings/recordings/{self._video_filename}?t={timestamp}"
+        # Find this camera's data using the same logic as state
+        camera_data = self._find_camera_data()
+        if camera_data is not None:
+            # Use corrected timestamp (falls back to file mtime if API is stale)
+            corr_date, corr_timestamp = self._get_corrected_timestamp(camera_data)
+            attributes["date"] = corr_date
+            attributes["timestamp"] = corr_timestamp
+            attributes["duration"] = camera_data.get("duration")
+            attributes["event_type"] = camera_data.get("event_type")
+            attributes["last_updated"] = now.isoformat()
+            
+            # Get the file path - try exact match first, then case-insensitive
+            recording_path = self.coordinator.recording_paths.get(self.camera_name)
+            if not recording_path:
+                for k, v in self.coordinator.recording_paths.items():
+                    if k.lower() == self.camera_name.lower():
+                        recording_path = v
+                        break
+            
+            if recording_path:
+                attributes["file_path"] = recording_path
+                attributes["file_name"] = self._video_filename
+                
+                # Media URL (MP4) for tap-to-play - using /local/ URL via symlink
+                attributes["media_url"] = f"/local/reolink_recordings/recordings/{self._video_filename}?t={timestamp}"
 
-                        # Select the appropriate snapshot image based on configuration
-                        # Lookup paths with case-insensitive fallback
-                        gif_path = getattr(self.coordinator, "snapshot_paths", {}).get(self.camera_name)
-                        if not gif_path:
-                            for k, v in getattr(self.coordinator, "snapshot_paths", {}).items():
-                                if k.lower() == self.camera_name.lower():
-                                    gif_path = v
-                                    break
+                # Select the appropriate snapshot image based on configuration
+                # Lookup paths with case-insensitive fallback
+                gif_path = getattr(self.coordinator, "snapshot_paths", {}).get(self.camera_name)
+                if not gif_path:
+                    for k, v in getattr(self.coordinator, "snapshot_paths", {}).items():
+                        if k.lower() == self.camera_name.lower():
+                            gif_path = v
+                            break
 
-                        jpg_path = getattr(self.coordinator, "jpg_snapshot_paths", {}).get(self.camera_name)
-                        if not jpg_path:
-                            for k, v in getattr(self.coordinator, "jpg_snapshot_paths", {}).items():
-                                if k.lower() == self.camera_name.lower():
-                                    jpg_path = v
-                                    break
+                jpg_path = getattr(self.coordinator, "jpg_snapshot_paths", {}).get(self.camera_name)
+                if not jpg_path:
+                    for k, v in getattr(self.coordinator, "jpg_snapshot_paths", {}).items():
+                        if k.lower() == self.camera_name.lower():
+                            jpg_path = v
+                            break
+                
+                # Choose which snapshot to use for entity_picture
+                if self._snapshot_format == SNAPSHOT_FORMAT_GIF and gif_path:
+                    # Use GIF if configured for GIF only
+                    picture_url = f"/local/reolink_recordings/recordings/{self._gif_snapshot_filename}?t={timestamp}"
+                    attributes["entity_picture"] = picture_url
+                    self._attr_entity_picture = picture_url
+                elif self._snapshot_format == SNAPSHOT_FORMAT_JPG and jpg_path:
+                    # Use JPG if configured for JPG only
+                    picture_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
+                    attributes["entity_picture"] = picture_url
+                    self._attr_entity_picture = picture_url
+                elif self._snapshot_format == SNAPSHOT_FORMAT_BOTH:
+                    # If both, prefer GIF for entity_picture but include JPG as alternate_picture
+                    if gif_path:
+                        gif_url = f"/local/reolink_recordings/recordings/{self._gif_snapshot_filename}?t={timestamp}"
+                        attributes["entity_picture"] = gif_url
+                        self._attr_entity_picture = gif_url
                         
-                        # Choose which snapshot to use for entity_picture
-                        if self._snapshot_format == SNAPSHOT_FORMAT_GIF and gif_path:
-                            # Use GIF if configured for GIF only
-                            picture_url = f"/local/reolink_recordings/recordings/{self._gif_snapshot_filename}?t={timestamp}"
-                            attributes["entity_picture"] = picture_url
-                            self._attr_entity_picture = picture_url
-                        elif self._snapshot_format == SNAPSHOT_FORMAT_JPG and jpg_path:
-                            # Use JPG if configured for JPG only
-                            picture_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
-                            attributes["entity_picture"] = picture_url
-                            self._attr_entity_picture = picture_url
-                        elif self._snapshot_format == SNAPSHOT_FORMAT_BOTH:
-                            # If both, prefer GIF for entity_picture but include JPG as alternate_picture
-                            if gif_path:
-                                gif_url = f"/local/reolink_recordings/recordings/{self._gif_snapshot_filename}?t={timestamp}"
-                                attributes["entity_picture"] = gif_url
-                                self._attr_entity_picture = gif_url
-                                
-                                # If we also have a JPG, add it as an alternate
-                                if jpg_path:
-                                    jpg_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
-                                    attributes["jpg_picture"] = jpg_url
-                            elif jpg_path:
-                                # Fall back to JPG if GIF not available but we wanted both
-                                jpg_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
-                                attributes["entity_picture"] = jpg_url
-                                self._attr_entity_picture = jpg_url
-                        else:
-                            # Fallback to using the mp4 (may not render in picture card)
-                            picture_url = f"/media-source/{DOMAIN}/{self._video_filename}?t={timestamp}"
-                            attributes["entity_picture"] = picture_url
-                            self._attr_entity_picture = picture_url
-                        
+                        # If we also have a JPG, add it as an alternate
+                        if jpg_path:
+                            jpg_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
+                            attributes["jpg_picture"] = jpg_url
+                    elif jpg_path:
+                        # Fall back to JPG if GIF not available but we wanted both
+                        jpg_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
+                        attributes["entity_picture"] = jpg_url
+                        self._attr_entity_picture = jpg_url
+                else:
+                    # Fallback to using the mp4 (may not render in picture card)
+                    picture_url = f"/media-source/{DOMAIN}/{self._video_filename}?t={timestamp}"
+                    attributes["entity_picture"] = picture_url
+                    self._attr_entity_picture = picture_url
+                
         return attributes
