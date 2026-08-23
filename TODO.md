@@ -28,7 +28,7 @@ Items identified during a security review of this repository.
   - `file_path` exposes the full local path in `extra_state_attributes`.
   - **Fix:** Remove `file_path` from attributes or expose only the filename / media-source identifier.
 
-- [ ] **Fix `ssl=None` on WebSocket connections** (`coordinator.py`, line ~808)
+- [x] **Fix `ssl=None` on WebSocket connections** (`coordinator.py`, line ~808)
   - `websockets.connect(websocket_url, ssl=None)` may disable or bypass proper TLS verification for `wss://` connections.
   - **Fix:** Use the default SSL context for `wss://` (or an explicit verified context); only omit SSL for plain `ws://` localhost connections if needed.
 
@@ -120,5 +120,4 @@ Create `.github/workflows/validate.yml` with jobs for hassfest, HACS, and Ruff (
 These require code changes from the security section above, not automation alone:
 
 - Token redaction in debug logs
-- `ssl=None` WebSocket behavior
 - XSS in custom cards (ESLint can help only after rules are added)

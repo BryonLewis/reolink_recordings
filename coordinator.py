@@ -791,7 +791,8 @@ class ReolinkRecordingsCoordinator:
                 websocket_url = f"ws://{self.host}/api/websocket"
                 
             _LOGGER.debug(f"Connecting to WebSocket at {websocket_url}")
-            websocket = await websockets.connect(websocket_url, ssl=None)
+            # Use library defaults: verified TLS for wss://, no SSL for ws://
+            websocket = await websockets.connect(websocket_url)
             
             # WebSocket handshake - receive initial auth required message
             auth_required = await websocket.recv()
