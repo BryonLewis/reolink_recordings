@@ -369,7 +369,6 @@ class ReolinkRecordingCard extends HTMLElement {
       if (videoUrl) {
         const card = this.shadowRoot?.querySelector('.image-container');
         if (card) {
-          const oldHandler = card.onclick;
           card.onclick = () => this.handleTap(videoUrl);
         }
       }
@@ -563,7 +562,7 @@ class ReolinkRecordingCard extends HTMLElement {
         } else {
           cacheBuster = `t=${now}-${Math.floor(Math.random() * 1000)}`;
         }
-      } catch (e) {
+      } catch {
         // If parsing fails, generate a new timestamp
         cacheBuster = `t=${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       }

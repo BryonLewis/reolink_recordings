@@ -1,41 +1,41 @@
 """Config flow for Reolink Recordings integration."""
-import voluptuous as vol
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
+
+import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant, callback
 from homeassistant.const import (
     CONF_HOST,
     CONF_NAME,
-    CONF_USERNAME,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
+    CONF_USERNAME,
 )
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
-import homeassistant.helpers.config_validation as cv
 
 from .const import (
-    DOMAIN,
-    DEFAULT_SCAN_INTERVAL,
-    CONF_STORAGE_PATH,
-    DEFAULT_STORAGE_PATH,
-    CONF_SNAPSHOT_FORMAT,
-    DEFAULT_SNAPSHOT_FORMAT,
-    SNAPSHOT_FORMAT_GIF,
-    SNAPSHOT_FORMAT_JPG,
-    SNAPSHOT_FORMAT_BOTH,
     CONF_ENABLE_CACHING,
-    DEFAULT_ENABLE_CACHING,
+    CONF_ENABLE_EVENT_DRIVEN,
+    CONF_MOTION_SENSOR_MAPPING,
     CONF_RESOLUTION_PREFERENCE,
+    CONF_SNAPSHOT_FORMAT,
+    CONF_STORAGE_PATH,
+    CONF_UPLOAD_DELAY,
+    DEFAULT_ENABLE_CACHING,
+    DEFAULT_ENABLE_EVENT_DRIVEN,
     DEFAULT_RESOLUTION_PREFERENCE,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SNAPSHOT_FORMAT,
+    DEFAULT_STORAGE_PATH,
+    DEFAULT_UPLOAD_DELAY,
+    DOMAIN,
     RESOLUTION_HIGH,
     RESOLUTION_LOW,
-    CONF_UPLOAD_DELAY,
-    DEFAULT_UPLOAD_DELAY,
-    CONF_ENABLE_EVENT_DRIVEN,
-    DEFAULT_ENABLE_EVENT_DRIVEN,
-    CONF_MOTION_SENSOR_MAPPING,
+    SNAPSHOT_FORMAT_BOTH,
+    SNAPSHOT_FORMAT_GIF,
+    SNAPSHOT_FORMAT_JPG,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,10 +77,10 @@ class ReolinkRecordingsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return ReolinkRecordingsOptionsFlow(config_entry)
 
     async def async_step_user(
-        self, user_input: Optional[Dict[str, Any]] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
-        errors: Dict[str, str] = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             # Validate the provided data
@@ -127,7 +127,7 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
         super().__init__()
 
     async def async_step_init(
-        self, user_input: Optional[Dict[str, Any]] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle options flow."""
         if user_input is not None:
@@ -204,7 +204,7 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
         )
 
     async def async_step_motion_sensors(
-        self, user_input: Optional[Dict[str, Any]] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle motion sensor mapping configuration."""
         if user_input is not None:

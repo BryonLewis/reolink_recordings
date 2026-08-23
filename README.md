@@ -216,3 +216,39 @@ If you previously used `www/reolink_recordings` as the storage path, update the 
 The integration includes an intelligent caching system that avoids redundant downloads of identical recordings. Each recording is assigned a unique ID based on camera index, timestamp, event type, and duration. When a recording with the same ID is detected, the download is skipped, reducing network traffic and CPU usage.
 
 You can disable caching in the integration options when debugging or developing new features.
+
+## Development
+
+Pull requests and pushes run GitHub Actions (`.github/workflows/validate.yml`) with three jobs:
+
+- **hassfest** — validates `manifest.json`, translations, config flow, and `services.yaml`
+- **ruff** — Python linting
+- **eslint** — Lovelace card linting in `frontend/`
+
+The workflow also runs nightly to catch upstream Home Assistant rule changes.
+
+### Run checks locally
+
+**Python (Ruff):**
+
+```bash
+pip install ruff
+ruff check .
+```
+
+**JavaScript (ESLint):**
+
+```bash
+npm install
+npm run lint
+```
+
+**Home Assistant validation (hassfest):**
+
+Hassfest runs in CI via Docker. To run it locally:
+
+```bash
+docker run --rm -v "${PWD}://github/workspace" ghcr.io/home-assistant/hassfest
+```
+
+On Windows PowerShell, use `$PWD.Path` instead of `$PWD` in the volume mount if needed.
