@@ -70,12 +70,20 @@ class ReolinkRecordingsMediaSource(MediaSource):
                     _LOGGER.debug(f"Resolving {item.identifier} to {recording_path}")
                     return MediaSourceResponse(recording_path, mime_type or "")
                     
-            # Snapshots
+            # Snapshots (GIF)
             if hasattr(coordinator, "snapshot_paths"):
                 for camera_name, snapshot_path in coordinator.snapshot_paths.items():
                     if os.path.basename(snapshot_path) == item.identifier:
                         mime_type, _ = mimetypes.guess_type(snapshot_path)
                         # Return the actual file path for Home Assistant to serve
+                        _LOGGER.debug(f"Resolving {item.identifier} to {snapshot_path}")
+                        return MediaSourceResponse(snapshot_path, mime_type or "")
+
+            # Snapshots (JPG)
+            if hasattr(coordinator, "jpg_snapshot_paths"):
+                for camera_name, snapshot_path in coordinator.jpg_snapshot_paths.items():
+                    if os.path.basename(snapshot_path) == item.identifier:
+                        mime_type, _ = mimetypes.guess_type(snapshot_path)
                         _LOGGER.debug(f"Resolving {item.identifier} to {snapshot_path}")
                         return MediaSourceResponse(snapshot_path, mime_type or "")
 

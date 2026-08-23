@@ -1,7 +1,8 @@
 /**
  * Reolink Recording Card for Home Assistant
- * v1.1.2
- * A simple card to display Reolink camera recordings with auto-refresh
+ * v1.2.0
+ * A simple card to display Reolink camera recordings with auto-refresh.
+ * Recording media URLs are served via authenticated /media-source/ paths.
  */
 class ReolinkRecordingCard extends HTMLElement {
   static getConfigElement() {
@@ -928,7 +929,7 @@ class ReolinkRecordingCardEditor extends HTMLElement {
 }
 
 // Defensive registration pattern for reliability on slower devices
-const CARD_VERSION = '1.1.0';
+const CARD_VERSION = '1.2.0';
 const CARD_NAME = 'Reolink Recording Card';
 
 function registerReolinkCard() {

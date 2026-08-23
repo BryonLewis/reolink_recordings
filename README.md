@@ -7,7 +7,7 @@ A custom component that fetches and downloads the latest recordings from your **
 ## Features
 
 - Automatically discovers and downloads the latest recordings stored in your Reolink Home Hub from connected battery-powered cameras
-- Makes recordings available via `/local/` URLs for reliable access
+- Makes recordings available via Home Assistant's authenticated media source (requires login)
 - Creates sensors with attributes containing recording details
 - Detects specific event types (Motion, Person, Vehicle, Animal) from recording metadata
 - Uses fixed filenames for latest recordings to simplify dashboard usage
@@ -43,7 +43,7 @@ A custom component that fetches and downloads the latest recordings from your **
 ### Configuration Options
 After setup, you can adjust these options:
 - Scan Interval: How often to check for new recordings (in minutes)
-- Storage Path: Where to store downloaded recordings (should be set to `www/reolink_recordings` for proper functionality)
+- Storage Path: Where to store downloaded recordings (default: `reolink_recordings`, under your HA config directory — do **not** use a path under `www/`, which is publicly accessible)
 - Snapshot Format: Choose between animated GIF, static JPG, or both for snapshots
 - Enable Caching: Toggle the caching system on/off (useful to disable during development/debugging)
 - Resolution Preference: Choose between high-resolution (default) or low-resolution streams when browsing recordings
@@ -67,7 +67,7 @@ show_state: true
 show_name: true
 tap_action:
   action: url
-  url_path: /local/reolink_recordings/recordings/camera_name_latest.mp4
+  url_path: /api/sensor/sensor.camera_name_latest_recording/attribute/media_url
 ```
 
 Replace:
@@ -194,15 +194,21 @@ Each sensor has these attributes:
 - `event_type`: The detected event type (e.g., "Motion", "Motion Person", "Vehicle", "Animal")
 - `file_path`: Full path to the recording file
 - `file_name`: Name of the recording file
-- `media_url`: URL to access the media with cache-busting parameter
-- `entity_picture`: URL to the snapshot image (GIF or JPG based on configuration)
-- `jpg_picture`: URL to the JPG snapshot (when using both GIF and JPG format)
+- `media_url`: Authenticated URL to access the MP4 recording (via `/media-source/reolink_recordings/...`)
+- `entity_picture`: Authenticated URL to the snapshot image (GIF or JPG based on configuration)
+- `jpg_picture`: Authenticated URL to the JPG snapshot (when using both GIF and JPG format)
 
 These attributes can be used in automations, templates, and dashboard cards.
 
 ## Viewing Recordings
 
-All recordings downloaded from your Reolink Home Hub are stored in the `www/reolink_recordings/recordings` directory and can be accessed via `/local/reolink_recordings/recordings/` URLs. Each connected camera has fixed filenames for the latest recording (`camera_name_latest.mp4`), animated preview (`camera_name_latest.gif`), and snapshot (`camera_name_latest.jpg`) for easy reference in dashboards.
+Recordings are stored under `<config>/reolink_recordings/recordings/` by default (outside the public `www/` directory). They are served through Home Assistant's authenticated media source at `/media-source/reolink_recordings/...`, so only logged-in users can access surveillance footage.
+
+Each connected camera has fixed filenames for the latest recording (`camera_name_latest.mp4`), animated preview (`camera_name_latest.gif`), and snapshot (`camera_name_latest.jpg`) for easy reference in dashboards and automations.
+
+### Upgrading from earlier versions
+
+If you previously used `www/reolink_recordings` as the storage path, update the integration option to `reolink_recordings` (or another path outside `www/`), move any existing files from `www/reolink_recordings/recordings/` to the new location, and restart Home Assistant. Existing installs are migrated automatically on upgrade, but files must be moved manually or re-downloaded via a refresh.
 
 ## Performance Optimizations
 

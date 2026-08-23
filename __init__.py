@@ -43,6 +43,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     storage_path = entry.options.get(CONF_STORAGE_PATH, DEFAULT_STORAGE_PATH)
 
+    if storage_path.startswith("www/"):
+        _LOGGER.warning(
+            "Recordings are stored under %s, which is publicly served at /local/. "
+            "Update the storage path in integration options to %s (or another path "
+            "outside www/) and move your recordings to avoid exposing surveillance "
+            "footage without authentication.",
+            storage_path,
+            DEFAULT_STORAGE_PATH,
+        )
+
     # Create storage directory if it doesn't exist
     storage_dir = Path(hass.config.path(storage_path))
     os.makedirs(storage_dir, exist_ok=True)
