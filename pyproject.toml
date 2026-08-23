@@ -1,0 +1,29 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+]
+ignore = [
+    "BLE001",   # broad except handlers are common in HA integrations
+    "DTZ",      # timezone-aware datetime refactors tracked separately
+    "ASYNC230", # blocking file I/O inside async download paths
+    "PERF102",  # dict .items() vs .values() micro-optimizations
+    "E501",     # line length; existing code uses longer log strings
+    "E402",     # media_source.py uses conditional imports for HA compat
+    "SIM108",   # ternary readability preference in coordinator
+    "B904",     # raise-without-from in legacy error paths
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["homeassistant"]
+force-sort-within-sections = true
+combine-as-imports = true

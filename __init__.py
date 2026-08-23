@@ -1,27 +1,26 @@
 """Custom component for managing Reolink camera recordings."""
-import os
-import logging
-import asyncio
 from datetime import timedelta
+import logging
+import os
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers import device_registry as dr
 from homeassistant.const import (
     CONF_HOST,
-    CONF_USERNAME,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
+    CONF_USERNAME,
 )
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
-    DOMAIN,
-    DEFAULT_SCAN_INTERVAL,
     CONF_STORAGE_PATH,
-    DEFAULT_STORAGE_PATH,
     DATA_COORDINATOR,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_STORAGE_PATH,
+    DOMAIN,
 )
 from .coordinator import ReolinkRecordingsCoordinator
 from .frontend import setup_frontend
@@ -134,6 +133,7 @@ async def register_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
             _LOGGER.error(f"Entry ID {entry_id} not found for refresh service call")
     
     import voluptuous as vol
+
     from homeassistant.helpers import config_validation as cv
     
     SERVICE_REFRESH_SCHEMA = vol.Schema({

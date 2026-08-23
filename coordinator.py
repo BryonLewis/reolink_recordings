@@ -1,40 +1,36 @@
 """Data coordinator for Reolink Recordings."""
-import os
-import logging
-import json
 import asyncio
-import aiohttp
-import websockets
-import time
 from datetime import datetime
+import json
+import logging
+import os
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union
+import time
+from typing import Any
 
-from homeassistant.core import HomeAssistant
+import websockets
+
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    DOMAIN,
-    CONF_STORAGE_PATH,
-    DEFAULT_STORAGE_PATH,
+    CONF_ENABLE_CACHING,
+    CONF_ENABLE_EVENT_DRIVEN,
+    CONF_RESOLUTION_PREFERENCE,
     CONF_SNAPSHOT_FORMAT,
+    CONF_UPLOAD_DELAY,
+    DEFAULT_ENABLE_CACHING,
+    DEFAULT_ENABLE_EVENT_DRIVEN,
+    DEFAULT_RESOLUTION_PREFERENCE,
+    DEFAULT_SNAPSHOT_FORMAT,
+    DEFAULT_UPLOAD_DELAY,
+    EVENT_RECORDING_UPDATED,
+    RESOLUTION_HIGH,
+    SNAPSHOT_FORMAT_BOTH,
     SNAPSHOT_FORMAT_GIF,
     SNAPSHOT_FORMAT_JPG,
-    SNAPSHOT_FORMAT_BOTH,
-    DEFAULT_SNAPSHOT_FORMAT,
-    CONF_ENABLE_CACHING,
-    DEFAULT_ENABLE_CACHING,
-    CONF_RESOLUTION_PREFERENCE,
-    DEFAULT_RESOLUTION_PREFERENCE,
-    RESOLUTION_HIGH,
-    RESOLUTION_LOW,
-    EVENT_RECORDING_UPDATED,
-    CONF_UPLOAD_DELAY,
-    DEFAULT_UPLOAD_DELAY,
-    CONF_ENABLE_EVENT_DRIVEN,
-    DEFAULT_ENABLE_EVENT_DRIVEN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,14 +66,14 @@ class ReolinkRecordingsCoordinator:
         
         # Persistent mapping between camera indices and names
         # This is the key to fixing the camera mixup issue
-        self.camera_index_map: Dict[int, str] = {}
+        self.camera_index_map: dict[int, str] = {}
         
         # Store NVR ID for each camera index
-        self.camera_nvr_map: Dict[int, str] = {}
+        self.camera_nvr_map: dict[int, str] = {}
         
         # Maps for snapshot paths
-        self.snapshot_paths: Dict[str, str] = {}  # GIF paths
-        self.jpg_snapshot_paths: Dict[str, str] = {}  # JPG paths
+        self.snapshot_paths: dict[str, str] = {}  # GIF paths
+        self.jpg_snapshot_paths: dict[str, str] = {}  # JPG paths
         
         # Get snapshot format preference or use default
         self.snapshot_format = DEFAULT_SNAPSHOT_FORMAT
@@ -224,7 +220,7 @@ class ReolinkRecordingsCoordinator:
             _LOGGER.error(f"Error refreshing Reolink recordings: {ex}")
             return False
 
-    def _merge_camera_data(self, cached_data: List[Dict[str, Any]], new_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _merge_camera_data(self, cached_data: list[dict[str, Any]], new_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Merge new camera data with cached data, preserving valid cached entries if new one errors.
         
         Deduplicates by slug (lowercase, underscored) to prevent stale entries with
@@ -241,23 +237,13 @@ class ReolinkRecordingsCoordinator:
         # Index new data by slug, preferring proper-case names
         for c in new_data:
             slug = _slug(c.get("camera", ""))
-            if slug not in new_by_slug or (c.get("error") is None and "error" in new_by_slug[slug]):
-                new_by_slug[slug] = c
-            elif c.get("error") is None and new_by_slug[slug].get("error") is not None:
-                new_by_slug[slug] = c
-            # If both are valid, prefer proper-case name (contains space or mixed case)
-            elif c.get("error") is None and " " in c.get("camera", "") and " " not in new_by_slug[slug].get("camera", ""):
+            if slug not in new_by_slug or (c.get("error") is None and "error" in new_by_slug[slug]) or c.get("error") is None and new_by_slug[slug].get("error") is not None or c.get("error") is None and " " in c.get("camera", "") and " " not in new_by_slug[slug].get("camera", ""):
                 new_by_slug[slug] = c
         
         # Index cached data by slug, preferring proper-case names
         for c in cached_data:
             slug = _slug(c.get("camera", ""))
-            if slug not in cached_by_slug or (c.get("error") is None and "error" in cached_by_slug[slug]):
-                cached_by_slug[slug] = c
-            elif c.get("error") is None and cached_by_slug[slug].get("error") is not None:
-                cached_by_slug[slug] = c
-            # If both are valid, prefer proper-case name (contains space)
-            elif c.get("error") is None and " " in c.get("camera", "") and " " not in cached_by_slug[slug].get("camera", ""):
+            if slug not in cached_by_slug or (c.get("error") is None and "error" in cached_by_slug[slug]) or c.get("error") is None and cached_by_slug[slug].get("error") is not None or c.get("error") is None and " " in c.get("camera", "") and " " not in cached_by_slug[slug].get("camera", ""):
                 cached_by_slug[slug] = c
         
         # Get all unique slugs
@@ -304,7 +290,7 @@ class ReolinkRecordingsCoordinator:
         
         return list(merged_by_slug.values())
 
-    def _ensure_paths_for_camera(self, camera_data: Dict[str, Any]):
+    def _ensure_paths_for_camera(self, camera_data: dict[str, Any]):
         """Ensure recording_paths are populated for a camera data item."""
         camera_name = camera_data.get("camera")
         if not camera_name:
@@ -330,7 +316,7 @@ class ReolinkRecordingsCoordinator:
             if jpg_path.exists():
                 self.jpg_snapshot_paths[name] = str(jpg_path)
 
-    async def _scan_existing_files(self, cameras_data: List[Dict[str, Any]]):
+    async def _scan_existing_files(self, cameras_data: list[dict[str, Any]]):
         """Scan directory for existing files that might be missing from metadata."""
         # Get list of known cameras in current data
         known_cameras_lower = {c.get("camera", "").lower(): c for c in cameras_data}
@@ -375,7 +361,7 @@ class ReolinkRecordingsCoordinator:
         except Exception as e:
             _LOGGER.error(f"Error scanning existing files: {e}")
 
-    async def _discover_cameras(self) -> List[Dict[str, Any]]:
+    async def _discover_cameras(self) -> list[dict[str, Any]]:
         """Discover all Reolink cameras and their latest recordings."""
         # Get bearer token for API access
         token = await self._get_auth_token()
@@ -392,7 +378,7 @@ class ReolinkRecordingsCoordinator:
         results = []
         
         # Extract camera name to index mapping from media content IDs
-        _LOGGER.info(f"Discovering cameras and extracting reliable camera mappings")
+        _LOGGER.info("Discovering cameras and extracting reliable camera mappings")
         camera_name_to_index = {}
         
         for camera in root_result["children"]:
@@ -413,7 +399,7 @@ class ReolinkRecordingsCoordinator:
                 else:
                     _LOGGER.warning(f"Couldn't parse index from media_content_id: {camera['media_content_id']}")
             except (ValueError, IndexError) as e:
-                _LOGGER.warning(f"Error extracting camera index for {camera_name}: {str(e)}")
+                _LOGGER.warning(f"Error extracting camera index for {camera_name}: {e!s}")
         
         # Update our persistent camera mapping with the actual indices
         # Normalize camera names to proper title case for consistency
@@ -445,7 +431,7 @@ class ReolinkRecordingsCoordinator:
                 result = await self._get_latest_recording(camera_index, camera_name, token)
                 results.append(result)
             except Exception as e:
-                _LOGGER.error(f"Error processing camera {camera_name}: {str(e)}")
+                _LOGGER.error(f"Error processing camera {camera_name}: {e!s}")
                 results.append({
                     "camera": camera_name,
                     "error": str(e)
@@ -455,7 +441,7 @@ class ReolinkRecordingsCoordinator:
 
     async def _get_latest_recording(
         self, camera_index: int, camera_name: str, token: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get the latest recording for a specific camera index."""
         # Step 1: Get camera resolution options
         # Get NVR ID from our camera mapping
@@ -599,7 +585,7 @@ class ReolinkRecordingsCoordinator:
             "recording_id": recording_id,  # Add unique identifier
         }
 
-    async def _download_recordings(self, cameras_data: List[Dict[str, Any]]):
+    async def _download_recordings(self, cameras_data: list[dict[str, Any]]):
         """Download recordings for each camera."""
         token = await self._get_auth_token()
         headers = {"Authorization": f"Bearer {token}"}
@@ -774,7 +760,7 @@ class ReolinkRecordingsCoordinator:
         # In a production environment, you'd use a more secure method
         return self.password
 
-    async def _browse_media(self, media_content_id: str, token: str) -> Dict[str, Any]:
+    async def _browse_media(self, media_content_id: str, token: str) -> dict[str, Any]:
         """Browse media using direct Media Source API calls.
         
         Args:
@@ -789,7 +775,7 @@ class ReolinkRecordingsCoordinator:
         
     # _browse_via_media_player method removed - always using direct Media Source API
     
-    async def _browse_via_websocket_api(self, media_content_id: str, token: str) -> Dict[str, Any]:
+    async def _browse_via_websocket_api(self, media_content_id: str, token: str) -> dict[str, Any]:
         """Browse media using direct WebSocket API calls to the media source."""
         _LOGGER.debug(f"Using direct Media Source API for {media_content_id}")
         
@@ -847,7 +833,7 @@ class ReolinkRecordingsCoordinator:
             return response_data.get("result", {})
             
         except Exception as e:
-            raise RuntimeError(f"WebSocket API error: {str(e)}")
+            raise RuntimeError(f"WebSocket API error: {e!s}")
         finally:
             if websocket:
                 await websocket.close()
@@ -903,7 +889,7 @@ class ReolinkRecordingsCoordinator:
 
     async def _generate_gif_snapshot(self, video_path: Path, snapshot_path: Path):
         """Generate an animated GIF from the video using ffmpeg."""
-        import subprocess, shlex
+        import shlex
 
         # Generate animated GIF with reduced settings to improve loading time:
         # - Scale to 320px width (reduced from 640px) for faster loading
@@ -921,7 +907,7 @@ class ReolinkRecordingsCoordinator:
         
         This is a much less CPU-intensive operation than generating an animated GIF.
         """
-        import subprocess, shlex
+        import shlex
         
         # Generate a single frame JPG snapshot from the beginning of the video
         # Using higher resolution (1024px width) and maximum quality (-q:v 1)
@@ -931,7 +917,7 @@ class ReolinkRecordingsCoordinator:
         if proc.returncode != 0:
             raise RuntimeError("ffmpeg failed to generate JPG snapshot")
 
-    async def _download_file(self, url: str, headers: Dict[str, str], dest_path: Path):
+    async def _download_file(self, url: str, headers: dict[str, str], dest_path: Path):
         """Download a file from a URL and save it to the destination path."""
         # Ensure the directory exists
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -970,7 +956,7 @@ class ReolinkRecordingsCoordinator:
             # Re-raise the CancelledError so the caller knows the operation was cancelled
             raise
         except Exception as e:
-            _LOGGER.error(f"Download failed: {str(e)}")
+            _LOGGER.error(f"Download failed: {e!s}")
             # Clean up partial file if it exists
             if os.path.exists(dest_path):
                 try:
@@ -1058,7 +1044,7 @@ class ReolinkRecordingsCoordinator:
             try:
                 # Use async file operations to avoid blocking warnings
                 import aiofiles
-                async with aiofiles.open(metadata_file, "r") as f:
+                async with aiofiles.open(metadata_file) as f:
                     content = await f.read()
                     metadata = json.loads(content)
                 
@@ -1087,7 +1073,7 @@ class ReolinkRecordingsCoordinator:
             except ImportError:
                 # Fallback to sync operations if aiofiles not available
                 try:
-                    with open(metadata_file, "r") as f:
+                    with open(metadata_file) as f:
                         metadata = json.load(f)
                     
                     if "data" in metadata:

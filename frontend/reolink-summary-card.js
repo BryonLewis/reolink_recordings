@@ -124,7 +124,9 @@ class ReolinkSummaryCard extends HTMLElement {
           return new Date(y, mo, d, h, mi, s);
         }
       }
-    } catch(e) {}
+    } catch {
+      // Ignore parse failures and use fallback below
+    }
     return new Date(0); // fallback
   }
 

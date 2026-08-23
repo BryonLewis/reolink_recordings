@@ -2,14 +2,13 @@
 import logging
 import mimetypes
 import os
-from typing import Tuple
 
 from homeassistant.components.media_player.const import MediaClass, MediaType
+
 # Backwards compatibility for code still using old constant names
 MEDIA_CLASS_DIRECTORY = getattr(MediaClass, "DIRECTORY", "directory")
 MEDIA_CLASS_VIDEO = getattr(MediaClass, "VIDEO", "video")
 MEDIA_TYPE_VIDEO = getattr(MediaType, "VIDEO", "video")
-from homeassistant.components.media_source.const import MEDIA_MIME_TYPES
 from homeassistant.components.media_source.error import MediaSourceError, Unresolvable
 from homeassistant.components.media_source.models import (
     BrowseMediaSource,
@@ -19,16 +18,18 @@ from homeassistant.components.media_source.models import (
 
 # MediaSourceResponse was introduced in HA 2025.4; fall back if older core
 try:
-    from homeassistant.components.media_source.models import MediaSourceResponse  # type: ignore
+    from homeassistant.components.media_source.models import (
+        MediaSourceResponse,  # type: ignore
+    )
 except ImportError:  # pragma: no cover
     class MediaSourceResponse:  # minimal shim
         """Fallback response object for older Home Assistant versions."""
         def __init__(self, url: str, mime_type: str | None = None):
             self.url = url
             self.mime_type = mime_type or ""
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, DATA_COORDINATOR
+from .const import DATA_COORDINATOR, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,10 +60,10 @@ class ReolinkRecordingsMediaSource(MediaSource):
 
         _LOGGER.debug("Resolving media identifier %s", item.identifier)
         # Find the file
-        for entry_id, entry_data in self.hass.data[DOMAIN].items():
+        for _entry_id, entry_data in self.hass.data[DOMAIN].items():
             coordinator = entry_data[DATA_COORDINATOR]
             # Videos
-            for camera_name, recording_path in coordinator.recording_paths.items():
+            for _camera_name, recording_path in coordinator.recording_paths.items():
                 if os.path.basename(recording_path) == item.identifier:
                     mime_type, _ = mimetypes.guess_type(recording_path)
                     # Return the actual file path for Home Assistant to serve
@@ -72,7 +73,7 @@ class ReolinkRecordingsMediaSource(MediaSource):
                     
             # Snapshots (GIF)
             if hasattr(coordinator, "snapshot_paths"):
-                for camera_name, snapshot_path in coordinator.snapshot_paths.items():
+                for _camera_name, snapshot_path in coordinator.snapshot_paths.items():
                     if os.path.basename(snapshot_path) == item.identifier:
                         mime_type, _ = mimetypes.guess_type(snapshot_path)
                         # Return the actual file path for Home Assistant to serve
@@ -81,7 +82,7 @@ class ReolinkRecordingsMediaSource(MediaSource):
 
             # Snapshots (JPG)
             if hasattr(coordinator, "jpg_snapshot_paths"):
-                for camera_name, snapshot_path in coordinator.jpg_snapshot_paths.items():
+                for _camera_name, snapshot_path in coordinator.jpg_snapshot_paths.items():
                     if os.path.basename(snapshot_path) == item.identifier:
                         mime_type, _ = mimetypes.guess_type(snapshot_path)
                         _LOGGER.debug(f"Resolving {item.identifier} to {snapshot_path}")
@@ -114,7 +115,7 @@ class ReolinkRecordingsMediaSource(MediaSource):
         """Browse cameras."""
         cameras = {}
 
-        for entry_id, entry_data in self.hass.data[DOMAIN].items():
+        for _entry_id, entry_data in self.hass.data[DOMAIN].items():
             coordinator = entry_data[DATA_COORDINATOR]
             for camera_name, recording_path in coordinator.recording_paths.items():
                 cameras[camera_name] = recording_path

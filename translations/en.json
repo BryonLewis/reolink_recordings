@@ -1,4 +1,16 @@
 {
+  "services": {
+    "refresh": {
+      "name": "Refresh recordings",
+      "description": "Fetches and downloads the latest recordings from the Reolink Home Hub.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry",
+          "description": "Config entry to refresh. Defaults to the entry that registered the service."
+        }
+      }
+    }
+  },
   "device_automation": {
     "trigger_type": {
       "recording_updated": "New recording available",

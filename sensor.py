@@ -1,8 +1,8 @@
 """Sensor platform for Reolink Recordings."""
-import os
+from datetime import UTC, datetime, timedelta
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+import os
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -10,20 +10,20 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import dt as dt_util
+
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
 from .const import (
-    DOMAIN,
-    DATA_COORDINATOR,
     CONF_SNAPSHOT_FORMAT,
+    DATA_COORDINATOR,
+    DEFAULT_SNAPSHOT_FORMAT,
+    DOMAIN,
+    SNAPSHOT_FORMAT_BOTH,
     SNAPSHOT_FORMAT_GIF,
     SNAPSHOT_FORMAT_JPG,
-    SNAPSHOT_FORMAT_BOTH,
-    DEFAULT_SNAPSHOT_FORMAT,
 )
 from .coordinator import ReolinkRecordingsCoordinator
 
@@ -104,7 +104,7 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         """Return an authenticated media-source URL for a recording asset."""
         return f"/media-source/{DOMAIN}/{filename}?t={timestamp}"
     
-    def _find_camera_data(self) -> Optional[Dict[str, Any]]:
+    def _find_camera_data(self) -> dict[str, Any] | None:
         """Find the best matching camera data for this sensor.
         
         When multiple entries match by slug (e.g., 'first_landing' and 'First Landing'),
@@ -113,10 +113,9 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         matches = []
         for camera_data in self.coordinator.data.get("cameras", []):
             camera_name = camera_data.get("camera", "")
-            if camera_name == self.camera_name or \
-               camera_name.lower() == self.camera_name.lower():
-                if "error" not in camera_data:
-                    matches.append(camera_data)
+            if (camera_name == self.camera_name or \
+               camera_name.lower() == self.camera_name.lower()) and "error" not in camera_data:
+                matches.append(camera_data)
         
         if not matches:
             return None
@@ -149,7 +148,7 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         # Case-insensitive fallback
         return any(k.lower() == self.camera_name.lower() for k in self.coordinator.recording_paths)
     
-    def _get_corrected_timestamp(self, camera_data: Dict[str, Any]) -> tuple:
+    def _get_corrected_timestamp(self, camera_data: dict[str, Any]) -> tuple:
         """Return (date, timestamp) using file mtime if the API timestamp is stale.
         
         The Reolink NVR API can lag behind the actual recording file on disk.
@@ -182,7 +181,7 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
                     tz_str = "UTC"
                 tz = ZoneInfo(tz_str)
                 file_mtime = datetime.fromtimestamp(
-                    os.path.getmtime(recording_path), tz=timezone.utc
+                    os.path.getmtime(recording_path), tz=UTC
                 ).astimezone(tz)
                 date_parts = api_date.split("/")
                 time_parts = api_timestamp.split(":")
@@ -204,7 +203,7 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         return (api_date, api_timestamp)
     
     @property
-    def state(self) -> Optional[str]:
+    def state(self) -> str | None:
         """Return the state of the sensor."""
         camera_data = self._find_camera_data()
         if camera_data is None:
@@ -215,7 +214,7 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         return f"{date} {timestamp} - {event_type}"
     
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return entity specific state attributes."""
         attributes = {}
         now = datetime.now()
