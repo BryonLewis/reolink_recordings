@@ -36,14 +36,13 @@ A custom component that fetches and downloads the latest recordings from your **
 4. Follow the configuration steps:
    - Name: A name for this integration
    - Host: Your Home Assistant URL (default: http://localhost:8123)
-   - Username: Your Home Assistant username (not used yet)
-   - Password: Your Home Assistant Long-Lived Access Token
+   - Access Token: Your Home Assistant Long-Lived Access Token
      - Create one at your profile page → Long-Lived Access Tokens
 
 ### Configuration Options
 After setup, you can adjust these options:
 - Scan Interval: How often to check for new recordings (in minutes)
-- Storage Path: Where to store downloaded recordings (default: `reolink_recordings`, under your HA config directory — do **not** use a path under `www/`, which is publicly accessible)
+- Storage Path: Where to store downloaded recordings (default: `reolink_recordings` under your HA config directory). Absolute paths are allowed (e.g. `/media/reolink_recordings` or a NAS mount). Avoid `www/`, which is publicly accessible without login — a warning is logged if you use it.
 - Snapshot Format: Choose between animated GIF, static JPG, or both for snapshots
 - Enable Caching: Toggle the caching system on/off (useful to disable during development/debugging)
 - Resolution Preference: Choose between high-resolution (default) or low-resolution streams when browsing recordings
