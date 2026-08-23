@@ -44,7 +44,29 @@ _LOGGER = logging.getLogger(__name__)
 class ReolinkRecordingsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Reolink Recordings."""
 
-    VERSION = 1
+    VERSION = 2
+
+    @staticmethod
+    @callback
+    def async_migrate_entry(
+        hass: HomeAssistant, config_entry: config_entries.ConfigEntry
+    ) -> bool:
+        """Migrate old config entries."""
+        if config_entry.version == 1:
+            options = dict(config_entry.options)
+            storage_path = options.get(CONF_STORAGE_PATH, DEFAULT_STORAGE_PATH)
+            if storage_path == "www/reolink_recordings":
+                options[CONF_STORAGE_PATH] = DEFAULT_STORAGE_PATH
+                _LOGGER.info(
+                    "Migrating storage path from www/reolink_recordings to %s. "
+                    "Move existing recordings to the new directory or trigger a refresh "
+                    "to re-download them.",
+                    DEFAULT_STORAGE_PATH,
+                )
+            hass.config_entries.async_update_entry(
+                config_entry, options=options, version=2
+            )
+        return True
 
     @staticmethod
     @callback

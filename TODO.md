@@ -4,7 +4,7 @@ Items identified during a security review of this repository.
 
 ## High Priority
 
-- [ ] **Stop serving recordings via public `/local/` URLs**
+- [x] **Stop serving recordings via public `/local/` URLs**
   - Recordings are stored under `www/reolink_recordings` and exposed as `/local/reolink_recordings/recordings/...` in `sensor.py`.
   - Home Assistant serves `/local/` without authentication — anyone who can reach the instance may access surveillance footage.
   - **Fix:** Move storage outside `www/` (e.g. under the HA config directory), update default `storage_path`, and serve media through the authenticated media source (`/media-source/reolink_recordings/...`) instead of `/local/`.
@@ -119,7 +119,6 @@ Create `.github/workflows/validate.yml` with jobs for hassfest, HACS, and Ruff (
 
 These require code changes from the security section above, not automation alone:
 
-- Public `/local/` recording exposure
 - Token redaction in debug logs
 - `ssl=None` WebSocket behavior
 - XSS in custom cards (ESLint can help only after rules are added)

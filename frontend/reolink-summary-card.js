@@ -1,7 +1,9 @@
 /**
  * Reolink Summary Card for Home Assistant
+ * v1.1.0
  * A custom card that pulls together all Reolink recordings,
  * sorts them by recency, and displays them dynamically.
+ * Recording media URLs are served via authenticated /media-source/ paths.
  */
 class ReolinkSummaryCard extends HTMLElement {
   static getConfigElement() {
@@ -144,8 +146,8 @@ class ReolinkSummaryCard extends HTMLElement {
       if (!stateObj) return;
 
       const attrs = stateObj.attributes;
-      // Skip if missing critical info
-      if (!attrs || !attrs.file_path) return;
+      // Skip if missing critical info (file_name indicates a recording is available)
+      if (!attrs || (!attrs.file_name && !attrs.media_url)) return;
 
       const recDate = this._parseRecordingDate(attrs.date, attrs.timestamp);
       

@@ -4,7 +4,7 @@ DOMAIN = "reolink_recordings"
 
 # Configuration
 DEFAULT_SCAN_INTERVAL = 15  # minutes
-DEFAULT_STORAGE_PATH = "www/reolink_recordings"
+DEFAULT_STORAGE_PATH = "reolink_recordings"
 CONF_STORAGE_PATH = "storage_path"
 CONF_ENABLE_CACHING = "enable_caching"
 DEFAULT_ENABLE_CACHING = True
