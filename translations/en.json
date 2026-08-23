@@ -1,12 +1,51 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Reolink Recordings",
+        "description": "Connect using a Home Assistant long-lived access token.",
+        "data": {
+          "name": "Name",
+          "host": "Home Assistant URL",
+          "access_token": "Long-lived access token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect or validate configuration"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Reolink Recordings options",
+        "data": {
+          "scan_interval": "Scan interval (minutes)",
+          "storage_path": "Storage path (relative to config, or absolute e.g. /media/...; avoid www/)",
+          "snapshot_format": "Snapshot format",
+          "enable_caching": "Enable caching",
+          "resolution_preference": "Resolution preference",
+          "enable_event_driven": "Enable event-driven discovery",
+          "upload_delay": "Upload delay after motion (seconds)"
+        }
+      },
+      "motion_sensors": {
+        "title": "Motion sensor mapping",
+        "description": "{info}"
+      }
+    },
+    "error": {
+      "invalid_storage_path": "Storage path must be a non-empty absolute path, or a relative path under the Home Assistant config directory (no ..)."
+    }
+  },
   "services": {
     "refresh": {
       "name": "Refresh recordings",
-      "description": "Fetches and downloads the latest recordings from the Reolink Home Hub.",
+      "description": "Fetches and downloads the latest recordings from the Reolink Home Hub. Requires an admin user.",
       "fields": {
         "entry_id": {
           "name": "Config entry",
-          "description": "Config entry to refresh. Defaults to the entry that registered the service."
+          "description": "Config entry to refresh. Defaults to all loaded entries when omitted."
         }
       }
     }
@@ -15,7 +54,7 @@
     "trigger_type": {
       "recording_updated": "New recording available",
       "vehicle_detected": "Vehicle detected in recording",
-      "person_detected": "Person detected in recording", 
+      "person_detected": "Person detected in recording",
       "motion_detected": "Motion detected in recording"
     }
   }

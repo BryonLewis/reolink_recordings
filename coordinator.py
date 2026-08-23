@@ -45,8 +45,7 @@ class ReolinkRecordingsCoordinator:
         hass: HomeAssistant,
         entry_id: str,
         host: str,
-        username: str,
-        password: str,
+        access_token: str,
         storage_dir: Path,
         entry: ConfigEntry = None,  # Added to support snapshot format options
     ):
@@ -54,8 +53,7 @@ class ReolinkRecordingsCoordinator:
         self.hass = hass
         self.entry_id = entry_id
         self.host = host
-        self.username = username
-        self.password = password
+        self.access_token = access_token
         self.storage_dir = storage_dir
         self.entry = entry  # Store config entry for options access
         self.session = async_get_clientsession(hass)
@@ -755,10 +753,8 @@ class ReolinkRecordingsCoordinator:
                 _LOGGER.error(f"Error downloading recording for {camera_name}: {e}")
 
     async def _get_auth_token(self) -> str:
-        """Get authentication token from Home Assistant."""
-        # For now, we'll assume the long-lived access token is stored in the password field
-        # In a production environment, you'd use a more secure method
-        return self.password
+        """Return the configured long-lived access token."""
+        return self.access_token
 
     async def _browse_media(self, media_content_id: str, token: str) -> dict[str, Any]:
         """Browse media using direct Media Source API calls.
@@ -891,17 +887,36 @@ class ReolinkRecordingsCoordinator:
     async def _generate_gif_snapshot(self, video_path: Path, snapshot_path: Path):
         """Generate an animated GIF from the video using ffmpeg."""
         import shlex
+        import tempfile
 
         # Generate animated GIF with reduced settings to improve loading time:
         # - Scale to 320px width (reduced from 640px) for faster loading
         # - Reduced to 1fps (from 2fps) to make files smaller
         # - Still using palette optimization for quality
         # - Limit to first 5 seconds (reduced from 10 seconds) for smaller file size
-        cmd = f"ffmpeg -y -t 5 -i {shlex.quote(str(video_path))} -vf \"fps=1,scale=320:-1:flags=lanczos,palettegen=max_colors=128:stats_mode=diff\" -f image2 /tmp/palette.png && ffmpeg -y -t 5 -i {shlex.quote(str(video_path))} -i /tmp/palette.png -filter_complex \"fps=1,scale=320:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5\" {shlex.quote(str(snapshot_path))}"
-        proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError("ffmpeg failed to generate animated GIF")
+        # Use a unique temp palette per invocation to avoid collisions when
+        # multiple cameras generate GIFs concurrently.
+        with tempfile.TemporaryDirectory(prefix="reolink_gif_") as tmpdir:
+            palette_path = Path(tmpdir) / "palette.png"
+            video = shlex.quote(str(video_path))
+            palette = shlex.quote(str(palette_path))
+            snapshot = shlex.quote(str(snapshot_path))
+            cmd = (
+                f"ffmpeg -y -t 5 -i {video} "
+                f'-vf "fps=1,scale=320:-1:flags=lanczos,palettegen=max_colors=128:stats_mode=diff" '
+                f"-f image2 {palette} && "
+                f"ffmpeg -y -t 5 -i {video} -i {palette} "
+                f'-filter_complex "fps=1,scale=320:-1:flags=lanczos[x];'
+                f'[x][1:v]paletteuse=dither=bayer:bayer_scale=5" {snapshot}'
+            )
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError("ffmpeg failed to generate animated GIF")
     
     async def _generate_jpg_snapshot(self, video_path: Path, snapshot_path: Path):
         """Generate a single JPG snapshot from the video using ffmpeg.

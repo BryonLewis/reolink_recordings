@@ -34,19 +34,19 @@ Items identified during a security review of this repository.
 
 ## Low Priority
 
-- [ ] **Improve token storage pattern**
+- [x] **Improve token storage pattern**
   - Long-lived access token is stored in `CONF_PASSWORD`; `CONF_USERNAME` is unused.
   - **Fix:** Consider a dedicated config key (e.g. `access_token`) with a config entry migration for existing installs.
 
-- [ ] **Restrict the refresh service to admin users** (`__init__.py`)
+- [x] **Restrict the refresh service to admin users** (`__init__.py`)
   - `reolink_recordings.refresh` triggers full re-downloads using the stored token with no explicit permission check.
   - **Fix:** Register as an admin-only service or verify caller permissions in the handler.
 
-- [ ] **Validate `storage_path` option** (`config_flow.py`, `__init__.py`)
+- [x] **Validate `storage_path` option** (`config_flow.py`, `__init__.py`)
   - Admins can set `storage_path` to any path under the HA config tree with no validation.
-  - **Fix:** Constrain paths to an expected directory (e.g. under config root, reject `www/` for recordings).
+  - **Fix:** Allow absolute paths; keep relative paths under config (reject `..`); warn if under `www/`.
 
-- [ ] **Use unique temp files for ffmpeg GIF generation** (`coordinator.py`)
+- [x] **Use unique temp files for ffmpeg GIF generation** (`coordinator.py`)
   - GIF generation writes to a shared `/tmp/palette.png`, which can collide when multiple instances run concurrently.
   - **Fix:** Use `tempfile` or a UUID-based temp path per invocation.
 

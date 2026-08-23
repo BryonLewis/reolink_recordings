@@ -8,14 +8,13 @@ from homeassistant import config_entries
 from homeassistant.const import (
     CONF_HOST,
     CONF_NAME,
-    CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
-    CONF_USERNAME,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
+    CONF_ACCESS_TOKEN,
     CONF_ENABLE_CACHING,
     CONF_ENABLE_EVENT_DRIVEN,
     CONF_MOTION_SENSOR_MAPPING,
@@ -37,6 +36,7 @@ from .const import (
     SNAPSHOT_FORMAT_GIF,
     SNAPSHOT_FORMAT_JPG,
 )
+from .helpers import is_www_storage_path, validate_storage_path
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,29 +44,7 @@ _LOGGER = logging.getLogger(__name__)
 class ReolinkRecordingsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Reolink Recordings."""
 
-    VERSION = 2
-
-    @staticmethod
-    @callback
-    def async_migrate_entry(
-        hass: HomeAssistant, config_entry: config_entries.ConfigEntry
-    ) -> bool:
-        """Migrate old config entries."""
-        if config_entry.version == 1:
-            options = dict(config_entry.options)
-            storage_path = options.get(CONF_STORAGE_PATH, DEFAULT_STORAGE_PATH)
-            if storage_path == "www/reolink_recordings":
-                options[CONF_STORAGE_PATH] = DEFAULT_STORAGE_PATH
-                _LOGGER.info(
-                    "Migrating storage path from www/reolink_recordings to %s. "
-                    "Move existing recordings to the new directory or trigger a refresh "
-                    "to re-download them.",
-                    DEFAULT_STORAGE_PATH,
-                )
-            hass.config_entries.async_update_entry(
-                config_entry, options=options, version=2
-            )
-        return True
+    VERSION = 3
 
     @staticmethod
     @callback
@@ -107,8 +85,7 @@ class ReolinkRecordingsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_NAME, default="Reolink Recordings"): str,
                     vol.Required(CONF_HOST, default="http://localhost:8123"): str,
-                    vol.Required(CONF_USERNAME): str,
-                    vol.Required(CONF_PASSWORD): str,
+                    vol.Required(CONF_ACCESS_TOKEN): str,
                 }
             ),
             errors=errors,
@@ -130,18 +107,30 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle options flow."""
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            # Check if user wants to configure motion sensor mapping
-            if user_input.get(CONF_ENABLE_EVENT_DRIVEN, False):
-                # Store the basic options and proceed to motion sensor mapping
-                self._basic_options = user_input
-                return await self.async_step_motion_sensors()
+            storage_path = user_input.get(CONF_STORAGE_PATH, DEFAULT_STORAGE_PATH)
+            if path_error := validate_storage_path(self.hass, storage_path):
+                errors[CONF_STORAGE_PATH] = path_error
             else:
+                if is_www_storage_path(self.hass, storage_path):
+                    _LOGGER.warning(
+                        "Storage path %s is under www/ and will be publicly served "
+                        "at /local/ without authentication. Prefer %s or another "
+                        "path outside www/.",
+                        storage_path,
+                        DEFAULT_STORAGE_PATH,
+                    )
+                if user_input.get(CONF_ENABLE_EVENT_DRIVEN, False):
+                    # Store the basic options and proceed to motion sensor mapping
+                    self._basic_options = user_input
+                    return await self.async_step_motion_sensors()
                 # Event-driven disabled, save options without mapping
                 return self.async_create_entry(title="", data=user_input)
 
         current_options = self._config_entry.options
-        
+
         options = {
             vol.Optional(
                 CONF_SCAN_INTERVAL,
@@ -196,8 +185,9 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
         }
 
         return self.async_show_form(
-            step_id="init", 
+            step_id="init",
             data_schema=vol.Schema(options),
+            errors=errors,
             description_placeholders={
                 "motion_sensor_info": "If event-driven discovery is enabled, you'll be able to configure motion sensor mappings on the next step."
             }
@@ -210,32 +200,32 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             # Combine basic options with motion sensor mapping
             final_options = {**self._basic_options}
-            
+
             # Build motion sensor mapping from user input
             motion_mapping = {}
             for key, value in user_input.items():
                 if key.startswith("sensor_") and value != "none":
                     sensor_id = key.replace("sensor_", "")
                     motion_mapping[sensor_id] = value
-            
+
             if motion_mapping:
                 final_options[CONF_MOTION_SENSOR_MAPPING] = motion_mapping
-            
+
             return self.async_create_entry(title="", data=final_options)
-        
+
         # Get available motion sensors and cameras
         await self._get_available_entities()
-        
+
         if not self._motion_sensors:
             # No motion sensors found, skip mapping
             return self.async_create_entry(title="", data=self._basic_options)
-        
+
         # Build schema for motion sensor mapping
         current_mapping = self._config_entry.options.get(CONF_MOTION_SENSOR_MAPPING, {})
         schema_dict = {}
-        
+
         camera_options = ["none"] + [f"{idx}: {name}" for idx, name in self._cameras]
-        
+
         for sensor in self._motion_sensors:
             # Find current mapping for this sensor
             current_camera = "none"
@@ -247,9 +237,9 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
                             current_camera = f"{idx}: {name}"
                             break
                     break
-            
+
             schema_dict[vol.Optional(f"sensor_{sensor}", default=current_camera)] = vol.In(camera_options)
-        
+
         return self.async_show_form(
             step_id="motion_sensors",
             data_schema=vol.Schema(schema_dict),
@@ -257,18 +247,18 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
                 "info": "Map motion sensors to cameras for event-driven recording updates. Select 'none' to disable mapping for a sensor."
             }
         )
-    
+
     async def _get_available_entities(self):
         """Get available motion sensors and cameras."""
         # Get motion sensors
         states = self.hass.states.async_all()
         self._motion_sensors = []
-        
+
         for state in states:
-            if (state.entity_id.startswith("binary_sensor.") and 
+            if (state.entity_id.startswith("binary_sensor.") and
                 (state.attributes.get("device_class") == "motion" or "motion" in state.entity_id.lower())):
                 self._motion_sensors.append(state.entity_id)
-        
+
         # Get cameras from coordinator if available
         self._cameras = []
         coordinator_data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id, {}).get("coordinator")
