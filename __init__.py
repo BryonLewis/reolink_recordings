@@ -14,8 +14,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryError
-from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.service import async_register_admin_service
 
