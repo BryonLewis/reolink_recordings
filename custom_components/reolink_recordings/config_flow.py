@@ -36,7 +36,11 @@ from .const import (
     SNAPSHOT_FORMAT_GIF,
     SNAPSHOT_FORMAT_JPG,
 )
-from .helpers import is_www_storage_path, validate_storage_path
+from .helpers import (
+    is_www_storage_path,
+    validate_ha_credentials,
+    validate_storage_path,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,22 +65,30 @@ class ReolinkRecordingsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Validate the provided data
-            # For now, we'll just check if we can connect to Home Assistant
-            # In a production component, you would validate credentials here
-            try:
-                # Check if this config already exists
-                await self.async_set_unique_id(f"{user_input[CONF_HOST]}")
-                self._abort_if_unique_id_configured()
+            user_input = {
+                **user_input,
+                CONF_HOST: user_input[CONF_HOST].strip(),
+                CONF_ACCESS_TOKEN: user_input[CONF_ACCESS_TOKEN].strip(),
+            }
 
-                # Return the config entry
-                return self.async_create_entry(
-                    title=user_input[CONF_NAME],
-                    data=user_input,
-                )
-            except Exception as ex:
-                _LOGGER.error(f"Error validating input: {ex}")
-                errors["base"] = "cannot_connect"
+            if error := await validate_ha_credentials(
+                self.hass,
+                user_input[CONF_HOST],
+                user_input[CONF_ACCESS_TOKEN],
+            ):
+                errors["base"] = error
+            else:
+                try:
+                    await self.async_set_unique_id(user_input[CONF_HOST])
+                    self._abort_if_unique_id_configured()
+
+                    return self.async_create_entry(
+                        title=user_input[CONF_NAME],
+                        data=user_input,
+                    )
+                except Exception as ex:
+                    _LOGGER.error("Error creating config entry: %s", ex)
+                    errors["base"] = "cannot_connect"
 
         # Show the form
         return self.async_show_form(

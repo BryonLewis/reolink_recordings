@@ -16,7 +16,7 @@ Items identified during a security review of this repository.
   - Download requests log `Authorization` headers at debug level (line ~940).
   - **Fix:** Redact or omit sensitive fields before logging.
 
-- [ ] **Validate credentials during config flow** (`config_flow.py`)
+- [x] **Validate credentials during config flow** (`config_flow.py`)
   - Setup accepts any host/username/password without verifying the long-lived access token works.
   - **Fix:** Test the token against HA's WebSocket or REST API during `async_step_user` before creating the config entry.
 
@@ -107,5 +107,4 @@ Consider extending `validate.yml` with HACS validation and optional Bandit, and 
 These require code changes from the security section above, not automation alone:
 
 - XSS in custom cards (ESLint helps only with rules that catch unsafe `innerHTML` usage)
-- Credential validation during config flow
 - Removing `file_path` from public entity attributes
