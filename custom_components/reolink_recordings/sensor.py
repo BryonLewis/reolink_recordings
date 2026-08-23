@@ -101,8 +101,12 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         )
 
     def _media_source_url(self, filename: str, timestamp: str) -> str:
-        """Return an authenticated media-source URL for a recording asset."""
-        return f"/media-source/{DOMAIN}/{filename}?t={timestamp}"
+        """Return an authenticated API URL for a recording asset.
+
+        Uses /api/reolink_recordings/... (requires HA login) so dashboard
+        <img> tags work. Bare /media-source/... paths are not HTTP endpoints.
+        """
+        return f"/api/{DOMAIN}/{filename}?t={timestamp}"
     
     def _find_camera_data(self) -> dict[str, Any] | None:
         """Find the best matching camera data for this sensor.

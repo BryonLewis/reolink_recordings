@@ -1,9 +1,9 @@
 /**
  * Reolink Summary Card for Home Assistant
- * v1.1.0
+ * v1.1.1
  * A custom card that pulls together all Reolink recordings,
  * sorts them by recency, and displays them dynamically.
- * Recording media URLs are served via authenticated /media-source/ paths.
+ * Recording media is served via authenticated /api/reolink_recordings/ paths.
  */
 
 function isSafeMediaUrl(url) {
@@ -12,8 +12,46 @@ function isSafeMediaUrl(url) {
   return (
     trimmed.startsWith('/') ||
     trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://')
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('blob:')
   );
+}
+
+/**
+ * Resolve an authenticated media URL for <img>/video use.
+ * /api/ paths require auth; <img> cannot send headers, so we fetch with the
+ * HA access token and return a blob: URL (or a signed path for new-tab opens).
+ */
+async function resolveMediaUrl(hass, url, { asBlob = false } = {}) {
+  if (!hass || !url || !isSafeMediaUrl(url)) return url;
+  if (url.startsWith('blob:') || url.startsWith('/local/')) return url;
+  if (url.includes('authSig=') && !asBlob) return url;
+
+  const pathOnly = url.split('?')[0];
+
+  try {
+    if (asBlob && (pathOnly.startsWith('/api/') || url.startsWith('/api/'))) {
+      const abs = typeof hass.hassUrl === 'function' ? hass.hassUrl(pathOnly) : pathOnly;
+      const token = hass.auth && hass.auth.data && hass.auth.data.access_token;
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const resp = await fetch(abs, { headers, credentials: 'same-origin' });
+      if (!resp.ok) {
+        throw new Error(`media fetch HTTP ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      return URL.createObjectURL(blob);
+    }
+
+    if (pathOnly.startsWith('/api/')) {
+      const signed = await hass.callWS({ type: 'auth/sign_path', path: pathOnly });
+      if (signed && signed.path) {
+        return signed.path;
+      }
+    }
+  } catch {
+    // Fall through and return the original URL
+  }
+  return url;
 }
 
 class ReolinkSummaryCard extends HTMLElement {
@@ -148,8 +186,12 @@ class ReolinkSummaryCard extends HTMLElement {
       targetEntities = Object.keys(this._hass.states).filter(entityId => 
         entityId.startsWith('sensor.') && (entityId.includes('_latest_recording'))
       );
-    } else {
-      targetEntities = this._config.entities || [];
+    }
+    // Always merge any explicitly configured entities
+    for (const entityId of (this._config.entities || [])) {
+      if (entityId && !targetEntities.includes(entityId)) {
+        targetEntities.push(entityId);
+      }
     }
 
     const validRecordings = [];
@@ -160,7 +202,7 @@ class ReolinkSummaryCard extends HTMLElement {
 
       const attrs = stateObj.attributes;
       // Skip if missing critical info (file_name indicates a recording is available)
-      if (!attrs || (!attrs.file_name && !attrs.media_url)) return;
+      if (!attrs || (!attrs.file_name && !attrs.media_url && !attrs.file_path)) return;
 
       const recDate = this._parseRecordingDate(attrs.date, attrs.timestamp);
       
@@ -184,14 +226,6 @@ class ReolinkSummaryCard extends HTMLElement {
   }
 
   _getImageUrl(attrs) {
-    const existingTimestamp = (attrs.entity_picture && attrs.entity_picture.match(/[?&]t=([^&]+)/)) 
-      ? attrs.entity_picture.match(/[?&]t=([^&]+)/)[1] 
-      : null;
-    
-    const cacheBuster = existingTimestamp 
-      ? `t=${existingTimestamp}` 
-      : `t=${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      
     let baseUrl = '';
     if (this._config.use_jpg && attrs.jpg_picture) {
       baseUrl = attrs.jpg_picture;
@@ -200,16 +234,48 @@ class ReolinkSummaryCard extends HTMLElement {
     } else {
       return null;
     }
-    
-    return baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+    // entity_picture already includes a cache-buster (?t=...); don't duplicate it
+    if (baseUrl.includes('?')) {
+      return baseUrl;
+    }
+    return `${baseUrl}?t=${Date.now()}`;
   }
 
   _getVideoUrl(attrs) {
     if (!attrs.media_url) return null;
-    const existingTimestamp = (attrs.media_url.match(/[?&]t=([^&]+)/)) ? attrs.media_url.match(/[?&]t=([^&]+)/)[1] : null;
-    const cacheBuster = existingTimestamp ? `t=${existingTimestamp}` : `t=${Date.now()}`;
-    const baseUrl = attrs.media_url;
-    return baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+    // Keep path only for signing/fetch; cache-buster is unused for blob/signed opens
+    return attrs.media_url.split('?')[0];
+  }
+
+  _renderEmptyState() {
+    this.shadowRoot.innerHTML = `
+      <style>
+        .empty-message {
+          padding: 16px;
+          color: var(--secondary-text-color);
+        }
+        .title {
+          padding: 16px 16px 8px 16px;
+          font-size: 1.2rem;
+          font-weight: 500;
+          color: var(--primary-text-color);
+        }
+      </style>
+      <ha-card id="summary-card"></ha-card>
+    `;
+    const card = this.shadowRoot.getElementById('summary-card');
+    if (card && this._config.title) {
+      const titleEl = document.createElement('div');
+      titleEl.className = 'title';
+      titleEl.textContent = this._config.title;
+      card.appendChild(titleEl);
+    }
+    if (card) {
+      const message = document.createElement('div');
+      message.className = 'empty-message';
+      message.textContent = 'No recordings found. Ensure auto-discovery is enabled or entities are specified.';
+      card.appendChild(message);
+    }
   }
 
   render() {
@@ -218,41 +284,14 @@ class ReolinkSummaryCard extends HTMLElement {
     const recordings = this._getRecordingEntities();
     
     if (recordings.length === 0) {
-       if (!this.cardRendered) {
-         this.shadowRoot.innerHTML = `
-           <style>
-             .empty-message {
-               padding: 16px;
-               color: var(--secondary-text-color);
-             }
-             .title {
-               padding: 16px 16px 8px 16px;
-               font-size: 1.2rem;
-               font-weight: 500;
-               color: var(--primary-text-color);
-             }
-           </style>
-           <ha-card id="summary-card"></ha-card>
-         `;
-         const card = this.shadowRoot.getElementById('summary-card');
-         if (card && this._config.title) {
-           const titleEl = document.createElement('div');
-           titleEl.className = 'title';
-           titleEl.textContent = this._config.title;
-           card.appendChild(titleEl);
-         }
-         if (card) {
-           const message = document.createElement('div');
-           message.className = 'empty-message';
-           message.textContent = 'No recordings found. Ensure auto-discovery is enabled or entities are specified.';
-           card.appendChild(message);
-         }
-         this.cardRendered = true;
-       }
-       return;
+      this._renderEmptyState();
+      // Keep cardRendered false so a later hass update can build the real layout
+      this.cardRendered = false;
+      return;
     }
 
-    if (!this.cardRendered) {
+    const hasLayout = Boolean(this.shadowRoot.getElementById('recordings-container'));
+    if (!this.cardRendered || !hasLayout) {
       this.shadowRoot.innerHTML = `
         <style>
           ha-card {
@@ -609,10 +648,20 @@ class ReolinkSummaryCard extends HTMLElement {
 
     if (imageUrl && isSafeMediaUrl(imageUrl)) {
       const img = document.createElement('img');
-      img.src = imageUrl;
       img.alt = cleanName;
       img.loading = 'lazy';
       item.appendChild(img);
+      resolveMediaUrl(this._hass, imageUrl, { asBlob: true }).then((signed) => {
+        if (signed && isSafeMediaUrl(signed)) {
+          if (img.dataset.blobUrl) {
+            URL.revokeObjectURL(img.dataset.blobUrl);
+          }
+          if (signed.startsWith('blob:')) {
+            img.dataset.blobUrl = signed;
+          }
+          img.src = signed;
+        }
+      });
     } else {
       const placeholder = document.createElement('div');
       placeholder.style.height = '100%';
@@ -649,7 +698,9 @@ class ReolinkSummaryCard extends HTMLElement {
 
     if (videoUrl) {
       item.addEventListener('click', () => {
-        this._openModal(videoUrl, cleanName, timestamp);
+        resolveMediaUrl(this._hass, videoUrl, { asBlob: false }).then((signed) => {
+          this._openModal(signed, cleanName, timestamp);
+        });
       });
     }
 
