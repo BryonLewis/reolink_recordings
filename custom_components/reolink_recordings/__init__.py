@@ -33,6 +33,7 @@ from .helpers import (
     resolve_storage_path,
     validate_storage_path,
 )
+from .http import async_setup_http
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -154,7 +155,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up all platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register frontend resources
+    # Register authenticated media API + frontend resources
+    async_setup_http(hass)
     setup_frontend(hass)
 
     # Register services (once)

@@ -1,8 +1,8 @@
 /**
  * Reolink Recording Card for Home Assistant
- * v1.2.0
+ * v1.2.1
  * A simple card to display Reolink camera recordings with auto-refresh.
- * Recording media URLs are served via authenticated /media-source/ paths.
+ * Recording media is served via authenticated /api/reolink_recordings/ paths.
  */
 
 function isSafeMediaUrl(url) {
@@ -11,8 +11,44 @@ function isSafeMediaUrl(url) {
   return (
     trimmed.startsWith('/') ||
     trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://')
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('blob:')
   );
+}
+
+async function resolveMediaUrl(hass, url, { asBlob = false } = {}) {
+  // /api/ paths need HA auth. <img> cannot send Authorization headers, so for
+  // display we fetch with the access token and use a blob: URL. For new-tab /
+  // video opens we use auth/sign_path instead.
+  if (!hass || !url || !isSafeMediaUrl(url)) return url;
+  if (url.startsWith('blob:') || url.startsWith('/local/')) return url;
+  if (url.includes('authSig=') && !asBlob) return url;
+
+  const pathOnly = url.split('?')[0];
+
+  try {
+    if (asBlob && (pathOnly.startsWith('/api/') || url.startsWith('/api/'))) {
+      const abs = typeof hass.hassUrl === 'function' ? hass.hassUrl(pathOnly) : pathOnly;
+      const token = hass.auth && hass.auth.data && hass.auth.data.access_token;
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const resp = await fetch(abs, { headers, credentials: 'same-origin' });
+      if (!resp.ok) {
+        throw new Error(`media fetch HTTP ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      return URL.createObjectURL(blob);
+    }
+
+    if (pathOnly.startsWith('/api/')) {
+      const signed = await hass.callWS({ type: 'auth/sign_path', path: pathOnly });
+      if (signed && signed.path) {
+        return signed.path;
+      }
+    }
+  } catch {
+    // Fall through and return the original URL
+  }
+  return url;
 }
 
 class ReolinkRecordingCard extends HTMLElement {
@@ -55,7 +91,6 @@ class ReolinkRecordingCard extends HTMLElement {
 
   setConfig(config) {
     if (!config) {
-      console.warn('Reolink Recording Card: No configuration provided, using defaults');
       this._config = ReolinkRecordingCard.getStubConfig();
       return;
     }
@@ -91,26 +126,21 @@ class ReolinkRecordingCard extends HTMLElement {
   render() {
     try {
       if (!this._hass || !this._config) {
-        console.log('Reolink Card: Waiting for hass or config to be available');
         return;
       }
 
       if (!this._config.entity) {
-        console.warn('Reolink Card: No entity configured');
         this.renderError('Please define an entity');
         return;
       }
 
       const entity = this._hass.states[this._config.entity];
       if (!entity) {
-        console.warn(`Reolink Card: Entity not found: ${this._config.entity}`);
         this.renderError(`Entity not found: ${this._config.entity}`);
         return;
       }
 
       const attributes = entity.attributes || {};
-      console.log(`Reolink Card: Rendering ${this._config.entity}`, { attributes });
-      
       const entityName = entity.entity_id.split('.')[1].replace(/_/g, ' ');
       const friendlyName = attributes.friendly_name || entityName;
       const title = this._config.title || friendlyName;
@@ -154,7 +184,6 @@ class ReolinkRecordingCard extends HTMLElement {
 
     // Only render the card structure once unless the entity changes
     if (!this.cardRendered) {
-      console.log(`Reolink Card - Initial render for ${title}`);
       this.shadowRoot.innerHTML = `
         <style>
           ha-card {
@@ -321,21 +350,25 @@ class ReolinkRecordingCard extends HTMLElement {
       this.updateImageSource(imageUrl, videoUrl, attributes, title, showState);
     }
     } catch (error) {
-      console.error('Reolink Card: Render error that would cause "Configuration error":', error);
-      console.error('Reolink Card: Stack trace:', error.stack);
-      console.error('Reolink Card: Entity:', this._config?.entity);
-      console.error('Reolink Card: Config:', this._config);
-      
-      // Render a helpful error message instead of letting Home Assistant show "Configuration error"
-      this.renderError(`Render failed: ${error.message}. Check console for details.`);
+      this.renderError(`Render failed: ${error.message}`);
     }
   }
 
   _applyMediaContent(imageUrl, videoUrl, attributes, title, showState) {
     const img = this.shadowRoot?.querySelector('.reolink-image');
     if (img && isSafeMediaUrl(imageUrl)) {
-      img.src = imageUrl;
-      img.alt = title;
+      resolveMediaUrl(this._hass, imageUrl, { asBlob: true }).then((signed) => {
+        if (signed && isSafeMediaUrl(signed)) {
+          if (img.dataset.blobUrl) {
+            URL.revokeObjectURL(img.dataset.blobUrl);
+          }
+          if (signed.startsWith('blob:')) {
+            img.dataset.blobUrl = signed;
+          }
+          img.src = signed;
+          img.alt = title;
+        }
+      });
     }
 
     if (showState && attributes) {
@@ -353,7 +386,9 @@ class ReolinkRecordingCard extends HTMLElement {
     if (videoUrl) {
       const card = this.shadowRoot?.querySelector('.image-container');
       if (card) {
-        card.onclick = () => this.handleTap(videoUrl);
+        card.onclick = () => {
+          resolveMediaUrl(this._hass, videoUrl, { asBlob: false }).then((signed) => this.handleTap(signed));
+        };
       }
     }
   }
@@ -362,7 +397,6 @@ class ReolinkRecordingCard extends HTMLElement {
     try {
       // Only update if we have new image URL
       if (!imageUrl) {
-        console.log('Reolink Card: No image URL provided for update');
         return;
       }
       
@@ -378,11 +412,18 @@ class ReolinkRecordingCard extends HTMLElement {
       // Update image source
       const img = this.shadowRoot?.querySelector('.reolink-image');
       if (img && isSafeMediaUrl(imageUrl)) {
-        console.log(`Reolink Card: Updating image source for ${title}`);
-        img.src = imageUrl;
-        img.alt = title;
-      } else if (!img) {
-        console.warn('Reolink Card: Could not find image element to update');
+        resolveMediaUrl(this._hass, imageUrl, { asBlob: true }).then((signed) => {
+          if (signed && isSafeMediaUrl(signed)) {
+            if (img.dataset.blobUrl) {
+              URL.revokeObjectURL(img.dataset.blobUrl);
+            }
+            if (signed.startsWith('blob:')) {
+              img.dataset.blobUrl = signed;
+            }
+            img.src = signed;
+            img.alt = title;
+          }
+        });
       }
       
       // Update state info if needed
@@ -398,19 +439,18 @@ class ReolinkRecordingCard extends HTMLElement {
       if (videoUrl) {
         const card = this.shadowRoot?.querySelector('.image-container');
         if (card) {
-          card.onclick = () => this.handleTap(videoUrl);
+          card.onclick = () => {
+            resolveMediaUrl(this._hass, videoUrl, { asBlob: false }).then((signed) => this.handleTap(signed));
+          };
         }
       }
-    } catch (error) {
-      console.error('Reolink Card: Error updating image source:', error);
-      console.error('Reolink Card: This could cause "Configuration error" in UI');
+    } catch {
       this.isLoading = false;
       this.loadError = true;
     }
   }
 
   onImageLoaded() {
-    console.log('Image loaded successfully');
     this.isLoading = false;
     this.loadError = false;
     
@@ -420,7 +460,6 @@ class ReolinkRecordingCard extends HTMLElement {
   }
 
   onImageError() {
-    console.error('Failed to load image');
     this.isLoading = false;
     this.loadError = true;
     
@@ -489,8 +528,6 @@ class ReolinkRecordingCard extends HTMLElement {
       const maxOffset = Math.floor(refreshSeconds * 0.15) * 1000; // Convert to milliseconds
       const staggerOffset = Math.floor(Math.random() * maxOffset);
       
-      console.log(`[Reolink Recording Card] Setting up refresh for ${this._config.entity} with ${refreshSeconds}s interval and ${staggerOffset}ms stagger offset`);
-      
       // Add a small initial delay for the first refresh to avoid page load congestion
       setTimeout(() => {
         // Only trigger a refresh if the card is visible in viewport
@@ -502,7 +539,6 @@ class ReolinkRecordingCard extends HTMLElement {
         this.refreshInterval = setInterval(() => {
           // Only refresh if the card is visible in viewport and the tab is visible
           if (this.isElementInViewport() && document.visibilityState === 'visible') {
-            console.log(`[Reolink Recording Card] Auto-refreshing ${this._config.entity}`);
             this.refreshImage();
           }
         }, refreshSeconds * 1000);
@@ -512,7 +548,6 @@ class ReolinkRecordingCard extends HTMLElement {
       if (!this._visibilityHandler) {
         this._visibilityHandler = () => {
           if (document.visibilityState === 'visible') {
-            console.log(`[Reolink Recording Card] Visibility changed, refreshing ${this._config.entity}`);
             this.refreshImage();
           }
         };
@@ -524,7 +559,6 @@ class ReolinkRecordingCard extends HTMLElement {
         this._intersectionObserver = new IntersectionObserver((entries) => {
           const isVisible = entries[0].isIntersecting;
           if (isVisible) {
-            console.log(`[Reolink Recording Card] Card ${this._config.entity} entered viewport, refreshing`);
             this.refreshImage();
           }
         }, { threshold: 0.1 }); // Trigger when at least 10% of the card is visible
@@ -577,7 +611,6 @@ class ReolinkRecordingCard extends HTMLElement {
       if (matches) {
         existingTimestamp = matches[1];
         urlHasTimestamp = true;
-        console.log(`[Reolink Recording Card] Found existing timestamp in URL: ${existingTimestamp}`);
       }
     }
     
@@ -965,16 +998,12 @@ class ReolinkRecordingCardEditor extends HTMLElement {
 }
 
 // Defensive registration pattern for reliability on slower devices
-const CARD_VERSION = '1.2.0';
 const CARD_NAME = 'Reolink Recording Card';
 
 function registerReolinkCard() {
   try {
     // Defensive check - don't register if already registered
     if (customElements.get('reolink-recording-card')) {
-      console.info(`%c REOLINK-RECORDING-CARD %c v${CARD_VERSION} already registered `, 
-        'color: orange; font-weight: bold; background: black', 
-        'color: white; font-weight: bold; background: dimgray');
       return;
     }
 
@@ -996,15 +1025,9 @@ function registerReolinkCard() {
     customElements.define('reolink-recording-card', ReolinkRecordingCard);
     customElements.define('reolink-recording-card-editor', ReolinkRecordingCardEditor);
 
-    console.info(`%c REOLINK-RECORDING-CARD %c v${CARD_VERSION} loaded `, 
-      'color: orange; font-weight: bold; background: black', 
-      'color: white; font-weight: bold; background: dimgray');
-      
-  } catch (error) {
-    console.error('Failed to register Reolink Recording Card:', error);
+  } catch {
     // Retry registration after a short delay for slower devices
     setTimeout(() => {
-      console.warn('Retrying Reolink Recording Card registration...');
       registerReolinkCard();
     }, 1000);
   }
@@ -1022,7 +1045,6 @@ if (document.readyState === 'loading') {
 // Fallback registration on window load (for very slow devices)
 window.addEventListener('load', () => {
   if (!customElements.get('reolink-recording-card')) {
-    console.warn('Reolink Recording Card not registered yet, trying fallback registration...');
     registerReolinkCard();
   }
 });

@@ -1,37 +1,42 @@
 """Media source implementation for Reolink Recordings."""
+from __future__ import annotations
+
 import logging
 import mimetypes
 import os
 
 from homeassistant.components.media_player.const import MediaClass, MediaType
-
-# Backwards compatibility for code still using old constant names
-MEDIA_CLASS_DIRECTORY = getattr(MediaClass, "DIRECTORY", "directory")
-MEDIA_CLASS_VIDEO = getattr(MediaClass, "VIDEO", "video")
-MEDIA_TYPE_VIDEO = getattr(MediaType, "VIDEO", "video")
 from homeassistant.components.media_source.error import MediaSourceError, Unresolvable
 from homeassistant.components.media_source.models import (
     BrowseMediaSource,
     MediaSource,
     MediaSourceItem,
+    PlayMedia,
 )
-
-# MediaSourceResponse was introduced in HA 2025.4; fall back if older core
-try:
-    from homeassistant.components.media_source.models import (
-        MediaSourceResponse,  # type: ignore
-    )
-except ImportError:  # pragma: no cover
-    class MediaSourceResponse:  # minimal shim
-        """Fallback response object for older Home Assistant versions."""
-        def __init__(self, url: str, mime_type: str | None = None):
-            self.url = url
-            self.mime_type = mime_type or ""
 from homeassistant.core import HomeAssistant
 
 from .const import DATA_COORDINATOR, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+MEDIA_CLASS_DIRECTORY = getattr(MediaClass, "DIRECTORY", "directory")
+MEDIA_CLASS_VIDEO = getattr(MediaClass, "VIDEO", "video")
+MEDIA_TYPE_VIDEO = getattr(MediaType, "VIDEO", "video")
+
+
+def _iter_coordinators(hass: HomeAssistant):
+    """Yield loaded entry coordinators (skip internal DOMAIN keys)."""
+    for _key, entry_data in hass.data.get(DOMAIN, {}).items():
+        if not isinstance(entry_data, dict):
+            continue
+        coordinator = entry_data.get(DATA_COORDINATOR)
+        if coordinator is not None:
+            yield coordinator
+
+
+def _api_media_url(filename: str) -> str:
+    """Return the authenticated HTTP API path for a recording asset."""
+    return f"/api/{DOMAIN}/{filename}"
 
 
 async def async_get_media_source(hass: HomeAssistant) -> MediaSource:
@@ -49,53 +54,44 @@ class ReolinkRecordingsMediaSource(MediaSource):
         super().__init__(DOMAIN)
         self.hass = hass
 
-    async def async_resolve_media(self, item: MediaSourceItem) -> MediaSourceResponse:
-        """Resolve a media item to a URL."""
+    def _find_path(self, filename: str) -> str | None:
+        """Find a recording/snapshot filesystem path by basename."""
+        for coordinator in _iter_coordinators(self.hass):
+            for path_map in (
+                coordinator.recording_paths,
+                getattr(coordinator, "snapshot_paths", {}),
+                getattr(coordinator, "jpg_snapshot_paths", {}),
+            ):
+                for path_str in path_map.values():
+                    if os.path.basename(path_str) == filename:
+                        return path_str
+        return None
+
+    async def async_resolve_media(self, item: MediaSourceItem) -> PlayMedia:
+        """Resolve a media item to a playable URL."""
         if not item.identifier:
             raise Unresolvable("Media item is not a file")
 
-        # Check if we have any instances of this component
-        if not self.hass.data.get(DOMAIN):
+        if not any(_iter_coordinators(self.hass)):
             raise Unresolvable("No Reolink Recordings instances configured")
 
-        _LOGGER.debug("Resolving media identifier %s", item.identifier)
-        # Find the file
-        for _entry_id, entry_data in self.hass.data[DOMAIN].items():
-            coordinator = entry_data[DATA_COORDINATOR]
-            # Videos
-            for _camera_name, recording_path in coordinator.recording_paths.items():
-                if os.path.basename(recording_path) == item.identifier:
-                    mime_type, _ = mimetypes.guess_type(recording_path)
-                    # Return the actual file path for Home Assistant to serve
-                    # This is how media_source expects file paths to be returned
-                    _LOGGER.debug(f"Resolving {item.identifier} to {recording_path}")
-                    return MediaSourceResponse(recording_path, mime_type or "")
-                    
-            # Snapshots (GIF)
-            if hasattr(coordinator, "snapshot_paths"):
-                for _camera_name, snapshot_path in coordinator.snapshot_paths.items():
-                    if os.path.basename(snapshot_path) == item.identifier:
-                        mime_type, _ = mimetypes.guess_type(snapshot_path)
-                        # Return the actual file path for Home Assistant to serve
-                        _LOGGER.debug(f"Resolving {item.identifier} to {snapshot_path}")
-                        return MediaSourceResponse(snapshot_path, mime_type or "")
+        path = self._find_path(item.identifier)
+        if path is None:
+            raise Unresolvable(f"Could not find file: {item.identifier}")
 
-            # Snapshots (JPG)
-            if hasattr(coordinator, "jpg_snapshot_paths"):
-                for _camera_name, snapshot_path in coordinator.jpg_snapshot_paths.items():
-                    if os.path.basename(snapshot_path) == item.identifier:
-                        mime_type, _ = mimetypes.guess_type(snapshot_path)
-                        _LOGGER.debug(f"Resolving {item.identifier} to {snapshot_path}")
-                        return MediaSourceResponse(snapshot_path, mime_type or "")
-
-        raise Unresolvable(f"Could not find file: {item.identifier}")
+        mime_type, _ = mimetypes.guess_type(path)
+        # Serve via the authenticated API view (works outside www/)
+        return PlayMedia(
+            _api_media_url(item.identifier),
+            mime_type or "application/octet-stream",
+        )
 
     async def async_browse_media(self, item: MediaSourceItem) -> BrowseMediaSource:
         """Browse media."""
-        if not self.hass.data.get(DOMAIN):
+        if not any(_iter_coordinators(self.hass)):
             return BrowseMediaSource(
                 domain=DOMAIN,
-                identifier="",
+                identifier=None,
                 media_class=MEDIA_CLASS_DIRECTORY,
                 media_content_type="",
                 title=self.name,
@@ -113,12 +109,18 @@ class ReolinkRecordingsMediaSource(MediaSource):
 
     async def _async_browse_cameras(self) -> BrowseMediaSource:
         """Browse cameras."""
-        cameras = {}
+        cameras: dict[str, str] = {}
+        thumbnails: dict[str, str] = {}
 
-        for _entry_id, entry_data in self.hass.data[DOMAIN].items():
-            coordinator = entry_data[DATA_COORDINATOR]
+        for coordinator in _iter_coordinators(self.hass):
             for camera_name, recording_path in coordinator.recording_paths.items():
                 cameras[camera_name] = recording_path
+                gif = getattr(coordinator, "snapshot_paths", {}).get(camera_name)
+                jpg = getattr(coordinator, "jpg_snapshot_paths", {}).get(camera_name)
+                if gif:
+                    thumbnails[camera_name] = _api_media_url(os.path.basename(gif))
+                elif jpg:
+                    thumbnails[camera_name] = _api_media_url(os.path.basename(jpg))
 
         media_sources = []
         for camera_name, recording_path in cameras.items():
@@ -132,13 +134,13 @@ class ReolinkRecordingsMediaSource(MediaSource):
                     title=camera_name,
                     can_play=True,
                     can_expand=False,
-                    thumbnail=None,
+                    thumbnail=thumbnails.get(camera_name),
                 )
             )
 
         return BrowseMediaSource(
             domain=DOMAIN,
-            identifier="",
+            identifier=None,
             media_class=MEDIA_CLASS_DIRECTORY,
             media_content_type="",
             title=self.name,

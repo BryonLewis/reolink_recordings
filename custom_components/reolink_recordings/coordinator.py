@@ -210,13 +210,6 @@ class ReolinkRecordingsCoordinator:
                 "cameras": merged_cameras_data
             }
             
-            # TEMPORARY DEBUG: Log detailed data structure for debugging sensor issues
-            _LOGGER.debug("========== COORDINATOR DATA DEBUG ==========")
-            _LOGGER.debug(f"Complete data structure: {self.data}")
-            _LOGGER.debug(f"Recording paths: {self.recording_paths}")
-            _LOGGER.debug(f"GIF snapshot paths: {self.snapshot_paths}")
-            _LOGGER.debug(f"JPG snapshot paths: {self.jpg_snapshot_paths}")
-            
             # Save metadata
             await self._save_metadata()
 
@@ -227,11 +220,13 @@ class ReolinkRecordingsCoordinator:
                 except Exception as err:
                     _LOGGER.debug("Listener update failed: %s", err)
             
-            _LOGGER.info(f"Refreshed data for {len(merged_cameras_data)} Reolink cameras")
+            _LOGGER.debug(
+                "Refreshed data for %s Reolink cameras", len(merged_cameras_data)
+            )
             return True
         
         except Exception as ex:
-            _LOGGER.error(f"Error refreshing Reolink recordings: {ex}")
+            _LOGGER.error("Error refreshing Reolink recordings: %s", ex)
             return False
 
     def _merge_camera_data(self, cached_data: list[dict[str, Any]], new_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
