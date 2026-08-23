@@ -1,6 +1,10 @@
 # Reolink Recordings for Home Assistant
 
+Repository: [github.com/BryonLewis/reolink_recordings](https://github.com/BryonLewis/reolink_recordings)
+
 A custom component that fetches and downloads the latest recordings from your **Reolink Home Hub** (which stores recordings from Reolink battery-powered cameras), making them available as media sources in Home Assistant dashboards.
+
+Originally created by [@rcourtna](https://github.com/rcourtna); maintained by [@BryonLewis](https://github.com/BryonLewis).
 
 > **IMPORTANT**: This component only works with the **Reolink Home Hub** device and does not interact with Reolink cameras directly. The component interfaces with the Home Hub to access recordings that were previously captured and stored on the hub.
 
@@ -21,8 +25,8 @@ A custom component that fetches and downloads the latest recordings from your **
 ## Installation
 
 ### Manual Installation
-1. Download the repository as a ZIP file and extract it
-2. Copy the `reolink_recordings` folder to your Home Assistant `custom_components` directory
+1. Download the [repository](https://github.com/BryonLewis/reolink_recordings) as a ZIP file and extract it
+2. Copy the `custom_components/reolink_recordings` folder to your Home Assistant `custom_components` directory
 3. Restart Home Assistant
 
 > **Note:** HACS installation is not yet available for this component. It will be added in a future release.
@@ -120,7 +124,7 @@ This will open the recording in your browser when tapped.
 
 A custom Lovelace card has been created specifically for this integration and provides the best experience:
 
-1. Copy the `reolink-recording-card.js` file to your `www` directory
+1. Copy `custom_components/reolink_recordings/frontend/reolink-recording-card.js` to your `www` directory
 2. Add it as a resource in your Lovelace configuration:
    - Go to Settings → Dashboards → Resources
    - Add `/local/reolink-recording-card.js` as a JavaScript module
@@ -142,7 +146,7 @@ tap_action:
 
 The Reolink Summary Card provides a consolidated, timeline-based view of all your Reolink cameras. It automatically discovers all your `sensor.*_latest_recording` entities and sorts them by recency, featuring a "Hero" layout for the most recent event.
 
-1. Copy the `reolink-summary-card.js` file to your `www` directory
+1. Copy `custom_components/reolink_recordings/frontend/reolink-summary-card.js` to your `www` directory
 2. Add it as a resource in your Lovelace configuration:
    - Go to Settings → Dashboards → Resources
    - Add `/local/reolink-summary-card.js` as a JavaScript module
@@ -218,13 +222,11 @@ You can disable caching in the integration options when debugging or developing 
 
 ## Development
 
-Pull requests and pushes run GitHub Actions (`.github/workflows/validate.yml`) with three jobs:
+Pull requests run GitHub Actions (`.github/workflows/validate.yml`) with three jobs:
 
 - **hassfest** — validates `manifest.json`, translations, config flow, and `services.yaml`
 - **ruff** — Python linting
-- **eslint** — Lovelace card linting in `frontend/`
-
-The workflow also runs nightly to catch upstream Home Assistant rule changes.
+- **eslint** — Lovelace card linting in `custom_components/reolink_recordings/frontend/`
 
 ### Run checks locally
 
@@ -251,3 +253,7 @@ docker run --rm -v "${PWD}://github/workspace" ghcr.io/home-assistant/hassfest
 ```
 
 On Windows PowerShell, use `$PWD.Path` instead of `$PWD` in the volume mount if needed.
+
+## Attribution
+
+This integration was originally developed by [@rcourtna](https://github.com/rcourtna). The current repository and ongoing maintenance are by [@BryonLewis](https://github.com/BryonLewis).
