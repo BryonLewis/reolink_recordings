@@ -1,6 +1,10 @@
 # Reolink Recordings for Home Assistant
 
+Repository: [github.com/BryonLewis/reolink_recordings](https://github.com/BryonLewis/reolink_recordings)
+
 A custom component that fetches and downloads the latest recordings from your **Reolink Home Hub** (which stores recordings from Reolink battery-powered cameras), making them available as media sources in Home Assistant dashboards.
+
+Originally created by [@rcourtna](https://github.com/rcourtna); maintained by [@BryonLewis](https://github.com/BryonLewis).
 
 > **IMPORTANT**: This component only works with the **Reolink Home Hub** device and does not interact with Reolink cameras directly. The component interfaces with the Home Hub to access recordings that were previously captured and stored on the hub.
 
@@ -21,7 +25,7 @@ A custom component that fetches and downloads the latest recordings from your **
 ## Installation
 
 ### Manual Installation
-1. Download the repository as a ZIP file and extract it
+1. Download the [repository](https://github.com/BryonLewis/reolink_recordings) as a ZIP file and extract it
 2. Copy the `reolink_recordings` folder to your Home Assistant `custom_components` directory
 3. Restart Home Assistant
 
@@ -251,3 +255,7 @@ docker run --rm -v "${PWD}://github/workspace" ghcr.io/home-assistant/hassfest
 ```
 
 On Windows PowerShell, use `$PWD.Path` instead of `$PWD` in the volume mount if needed.
+
+## Attribution
+
+This integration was originally developed by [@rcourtna](https://github.com/rcourtna). The current repository and ongoing maintenance are by [@BryonLewis](https://github.com/BryonLewis).
