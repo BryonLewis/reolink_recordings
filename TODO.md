@@ -11,7 +11,7 @@ Items identified during a security review of this repository.
 
 ## Medium Priority
 
-- [ ] **Redact tokens from debug logs** (`coordinator.py`)
+- [x] **Redact tokens from debug logs** (`coordinator.py`)
   - WebSocket auth requests log the full `access_token` at debug level (line ~866).
   - Download requests log `Authorization` headers at debug level (line ~940).
   - **Fix:** Redact or omit sensitive fields before logging.
@@ -106,7 +106,6 @@ Consider extending `validate.yml` with HACS validation and optional Bandit, and 
 
 These require code changes from the security section above, not automation alone:
 
-- Token redaction in debug logs
 - XSS in custom cards (ESLint helps only with rules that catch unsafe `innerHTML` usage)
 - Credential validation during config flow
 - Removing `file_path` from public entity attributes
