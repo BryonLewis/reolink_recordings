@@ -52,40 +52,29 @@ Items identified during a security review of this repository.
 
 ## Documentation & API Consistency
 
-Services, triggers, and README are out of sync with the code.
+- [x] **Reconcile manual refresh / redownload services**
+  - Chose Option B: only `reolink_recordings.refresh` is registered and documented.
+  - Removed unused `SERVICE_FETCH_LATEST` / `SERVICE_DOWNLOAD_RECORDING` constants.
+  - `services.yaml`, translations, and README all document `refresh` (optional `entry_id`, admin-only).
 
-- [ ] **Reconcile manual refresh / redownload services**
-  - **Implemented:** `reolink_recordings.refresh` in `__init__.py` (optional `entry_id`), calls `coordinator.async_refresh()`.
-  - **Documented in README:** `reolink_recordings.fetch_latest_recordings` and `reolink_recordings.download_recording` — neither is registered in code.
-  - **Declared in `services.yaml`:** `fetch_latest_recordings` and `download_recording` — also not registered.
-  - **Constants in `const.py`:** `SERVICE_FETCH_LATEST` and `SERVICE_DOWNLOAD_RECORDING` — unused.
-  - **Fix:** Pick one approach and align everything:
-    - Option A: Implement the documented services (`fetch_latest_recordings` → full refresh; `download_recording` → single-camera download via existing `_discover_and_download_camera`), and keep or alias `refresh`.
-    - Option B: Remove the unused constants and update `services.yaml` + README to document only `reolink_recordings.refresh`.
+- [x] **Document device triggers and redownload automations** (`README.md`)
+  - Documented `recording_updated`, `vehicle_detected`, `person_detected`, `motion_detected`.
+  - Documented `reolink_recordings_updated` event data and example automations (notify + scheduled refresh).
 
-- [ ] **Document device triggers and redownload automations** (`README.md`)
-  - `device_trigger.py` exposes per-camera triggers: `recording_updated`, `vehicle_detected`, `person_detected`, `motion_detected` (translations in `translations/en.json`).
-  - README mentions using sensor attributes in automations but does not document device triggers or example automations for reacting to new recordings / triggering a redownload.
-  - **Fix:** Add a section covering available device triggers, the `reolink_recordings_updated` event, and example automation YAML (e.g. call the refresh service when a recording updates).
+- [x] **Document event-driven discovery options** (`README.md`)
+  - Documented `enable_event_driven`, `upload_delay`, motion-sensor mapping, and how they relate to scan interval and manual refresh.
 
-- [ ] **Document event-driven discovery options** (`README.md`)
-  - Config flow supports `enable_event_driven`, `upload_delay`, and motion-sensor-to-camera mapping (`config_flow.py`, `coordinator.py`).
-  - README configuration options omit these entirely.
-  - **Fix:** Document how motion-sensor-triggered discovery works and how it relates to periodic scan interval and manual refresh.
-
-- [ ] **Keep CI/service docs in sync after service reconciliation**
-  - Once services are aligned, update `services.yaml`, README, and any automation examples together so hassfest and user docs match registered handlers.
+- [x] **Keep CI/service docs in sync after service reconciliation**
+  - README services section, `services.yaml`, and automation examples match the registered `refresh` handler.
 
 ## CI
 
-No CI is configured today (no `.github/workflows`, tests, or lint config). Recommended additions, in priority order:
+`.github/workflows/validate.yml` runs on pull requests with hassfest, Ruff, and ESLint. README documents how to run the same checks locally.
 
 ### Essential
 
-- [ ] **Add hassfest validation**
-  - Validates `manifest.json`, translations, config flow, and `services.yaml` against Home Assistant core requirements.
-  - Use `home-assistant/actions/hassfest@master` in a GitHub Actions workflow.
-  - May already flag mismatches: see **Documentation & API Consistency** — `services.yaml` and README do not match the registered `refresh` service.
+- [x] **Add hassfest validation**
+  - Uses `home-assistant/actions/hassfest@master` in `.github/workflows/validate.yml`.
 
 - [ ] **Add HACS validation**
   - Required before HACS default-store submission (README notes HACS is not yet available).
@@ -93,9 +82,8 @@ No CI is configured today (no `.github/workflows`, tests, or lint config). Recom
 
 ### Recommended
 
-- [ ] **Add Ruff for Python linting**
-  - Low-effort static analysis across `coordinator.py`, `config_flow.py`, `sensor.py`, etc.
-  - No test suite required.
+- [x] **Add Ruff for Python linting**
+  - Runs via `astral-sh/ruff-action@v3` in CI; `ruff check .` locally.
 
 - [ ] **Add Bandit (or similar) for security static analysis**
   - Complements the security items above (subprocess usage, logging patterns, etc.).
@@ -107,17 +95,18 @@ No CI is configured today (no `.github/workflows`, tests, or lint config). Recom
   - No tests exist yet; meaningful coverage would need HA's test harness.
   - Good targets: coordinator merge/slug logic, path handling, config validation.
 
-- [ ] **Add ESLint for Lovelace cards** (optional)
-  - `frontend/reolink-recording-card.js` and `frontend/reolink-summary-card.js` are plain JS with no build step.
-  - Lower priority than hassfest and Ruff.
+- [x] **Add ESLint for Lovelace cards**
+  - Lints `custom_components/reolink_recordings/frontend/` in CI (`npm run lint`).
 
 ### Suggested workflow layout
 
-Create `.github/workflows/validate.yml` with jobs for hassfest, HACS, and Ruff (Bandit optional). Trigger on push, pull_request, and a daily schedule to catch upstream HA/hassfest changes.
+Consider extending `validate.yml` with HACS validation and optional Bandit, and adding `push` / scheduled triggers if you want coverage beyond pull requests.
 
 ### What CI will not catch
 
 These require code changes from the security section above, not automation alone:
 
 - Token redaction in debug logs
-- XSS in custom cards (ESLint can help only after rules are added)
+- XSS in custom cards (ESLint helps only with rules that catch unsafe `innerHTML` usage)
+- Credential validation during config flow
+- Removing `file_path` from public entity attributes

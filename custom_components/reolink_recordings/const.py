@@ -33,10 +33,6 @@ DEFAULT_ENABLE_EVENT_DRIVEN = True
 # Data keys
 DATA_COORDINATOR = "coordinator"
 
-# Services
-SERVICE_FETCH_LATEST = "fetch_latest_recordings"
-SERVICE_DOWNLOAD_RECORDING = "download_recording"
-
 # Events
 EVENT_RECORDING_UPDATED = "reolink_recordings_updated"
 

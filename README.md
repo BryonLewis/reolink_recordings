@@ -21,6 +21,9 @@ Originally created by [@rcourtna](https://github.com/rcourtna); maintained by [@
 - Intelligent caching system to avoid redundant downloads of identical recordings
 - Prepares downloaded recordings for future AI processing
 - Periodic update of recordings (configurable interval)
+- Optional event-driven discovery via mapped motion sensors
+- Device triggers and `reolink_recordings_updated` events for automations
+- Admin-only `reolink_recordings.refresh` service for on-demand updates
 
 ## Installation
 
@@ -45,11 +48,23 @@ Originally created by [@rcourtna](https://github.com/rcourtna); maintained by [@
 
 ### Configuration Options
 After setup, you can adjust these options:
-- Scan Interval: How often to check for new recordings (in minutes)
+- Scan Interval: How often to check for new recordings (in minutes). Used for periodic discovery even when event-driven mode is enabled.
 - Storage Path: Where to store downloaded recordings (default: `reolink_recordings` under your HA config directory). Absolute paths are allowed (e.g. `/media/reolink_recordings` or a NAS mount). Avoid `www/`, which is publicly accessible without login — a warning is logged if you use it.
 - Snapshot Format: Choose between animated GIF, static JPG, or both for snapshots
 - Enable Caching: Toggle the caching system on/off (useful to disable during development/debugging)
 - Resolution Preference: Choose between high-resolution (default) or low-resolution streams when browsing recordings
+- Enable Event-Driven Discovery: When enabled, motion sensors can trigger a targeted discovery for the mapped camera instead of waiting for the next scan interval (default: on)
+- Upload Delay: Seconds to wait after motion before checking the Home Hub for a new recording (default: 30; range 5–300). Gives the hub time to finish uploading.
+
+#### Event-driven discovery
+
+Periodic scans and event-driven discovery work together:
+
+1. **Periodic scan** (`scan_interval`) walks all cameras on a timer and downloads any new latest recordings.
+2. **Event-driven discovery** listens to mapped motion sensors. When motion clears, the integration waits `upload_delay` seconds, then discovers and downloads only that camera’s latest recording.
+3. **Manual refresh** (`reolink_recordings.refresh`) runs a full refresh of all cameras on demand (admin-only).
+
+When event-driven discovery is enabled in the options UI, a second step lets you map each motion sensor entity to a Home Hub camera. Choose **none** to leave a sensor unmapped. Without mappings, event-driven mode does nothing until you configure them.
 
 ## Usage
 
@@ -167,17 +182,74 @@ Features:
 
 ### Services
 
-The integration provides these services:
+#### `reolink_recordings.refresh`
 
-#### reolink_recordings.fetch_latest_recordings
-Manually triggers a refresh of all recordings stored on the Home Hub.
+Admin-only service that fetches and downloads the latest recordings from the Home Hub for all cameras (same work as a scheduled scan).
 
-#### reolink_recordings.download_recording
-Downloads a recording from the Home Hub for a specific camera.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `entry_id` | No | Config entry to refresh. When omitted, refreshes every loaded entry. |
 
-Parameters:
-- `camera_name`: Name of the camera
-- `entity_id`: Optional, the entity ID of this integration
+```yaml
+service: reolink_recordings.refresh
+data: {}
+```
+
+```yaml
+service: reolink_recordings.refresh
+data:
+  entry_id: "0123456789abcdef0123456789abcdef"
+```
+
+### Device triggers and events
+
+Each camera device exposes these [device triggers](https://www.home-assistant.io/docs/automation/trigger/#device-triggers) (also available under **Automations → Add trigger → Device**):
+
+| Trigger | When it fires |
+|---------|----------------|
+| New recording available (`recording_updated`) | Any new/updated recording for that camera |
+| Vehicle detected (`vehicle_detected`) | Recording event type contains “vehicle” |
+| Person detected (`person_detected`) | Recording event type contains “person” |
+| Motion detected (`motion_detected`) | Motion event that is not vehicle or person |
+
+These triggers listen for the `reolink_recordings_updated` bus event. You can also use that event directly:
+
+```yaml
+trigger:
+  - platform: event
+    event_type: reolink_recordings_updated
+```
+
+Event data may include: `camera`, `event_type`, `date`, `timestamp`, `duration`, `recording_id`, and `file_path`.
+
+#### Example: notify when a person is detected
+
+Configure via the UI with a device trigger, or in YAML (replace `device_id` with your camera device id from Developer Tools → Devices):
+
+```yaml
+alias: Notify on person recording
+trigger:
+  - platform: device
+    domain: reolink_recordings
+    device_id: YOUR_CAMERA_DEVICE_ID
+    type: person_detected
+action:
+  - service: notify.persistent_notification
+    data:
+      message: "Person detected on {{ trigger.event.data.camera }}"
+```
+
+#### Example: manual refresh on a schedule
+
+```yaml
+alias: Nightly Reolink refresh
+trigger:
+  - platform: time
+    at: "03:00:00"
+action:
+  - service: reolink_recordings.refresh
+    data: {}
+```
 
 ## Sensor Data and Attributes
 
