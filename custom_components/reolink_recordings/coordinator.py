@@ -35,6 +35,22 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB
+_REDACTED = "***REDACTED***"
+_SENSITIVE_KEYS = frozenset({"access_token", "Authorization", "authorization"})
+
+
+def _redact_for_log(value: Any) -> Any:
+    """Return a copy of value with tokens and auth headers redacted for logging."""
+    if isinstance(value, dict):
+        return {
+            key: _REDACTED if key in _SENSITIVE_KEYS else _redact_for_log(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_for_log(item) for item in value]
+    if isinstance(value, str) and value.startswith("Bearer "):
+        return f"Bearer {_REDACTED}"
+    return value
 
 
 class ReolinkRecordingsCoordinator:
@@ -742,7 +758,7 @@ class ReolinkRecordingsCoordinator:
                     timestamp=camera_data.get("timestamp"),
                     duration=camera_data.get("duration"),
                     recording_id=recording_id,
-                    file_path=str(dest_path)
+                    file_name=dest_path.name,
                 )
                 
             except asyncio.CancelledError:
@@ -846,7 +862,10 @@ class ReolinkRecordingsCoordinator:
             _LOGGER.debug(f"WebSocket hello message: {auth_msg}")
             
             auth_request = {"type": "auth", "access_token": token}
-            _LOGGER.debug(f"WebSocket auth request: {json.dumps(auth_request)}")
+            _LOGGER.debug(
+                "WebSocket auth request: %s",
+                json.dumps(_redact_for_log(auth_request)),
+            )
             await websocket.send(json.dumps(auth_request))
             
             auth_result = json.loads(await websocket.recv())
@@ -939,7 +958,7 @@ class ReolinkRecordingsCoordinator:
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         
         _LOGGER.debug(f"Downloading file from URL: {url}")
-        _LOGGER.debug(f"Headers: {headers}")
+        _LOGGER.debug("Headers: %s", _redact_for_log(headers))
         _LOGGER.debug(f"Destination path: {dest_path}")
         
         start_time = time.time()
@@ -1139,7 +1158,7 @@ class ReolinkRecordingsCoordinator:
         timestamp: str = None,
         duration: str = None,
         recording_id: str = None,
-        file_path: str = None,
+        file_name: str = None,
     ):
         """Fire an event when a recording is updated."""
         event_data = {
@@ -1149,7 +1168,7 @@ class ReolinkRecordingsCoordinator:
             "timestamp": timestamp,
             "duration": duration,
             "recording_id": recording_id,
-            "file_path": file_path,
+            "file_name": file_name,
         }
         
         # Remove None values

@@ -4,6 +4,17 @@
  * A simple card to display Reolink camera recordings with auto-refresh.
  * Recording media URLs are served via authenticated /media-source/ paths.
  */
+
+function isSafeMediaUrl(url) {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return (
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://')
+  );
+}
+
 class ReolinkRecordingCard extends HTMLElement {
   static getConfigElement() {
     return document.createElement('reolink-recording-card-editor');
@@ -259,17 +270,15 @@ class ReolinkRecordingCard extends HTMLElement {
               <!-- Using loading="lazy" attribute for image lazy loading -->
               <img 
                 class="reolink-image" 
-                src="${imageUrl}" 
-                alt="${title}" 
-                loading="lazy"
-                @load="${this.onImageLoaded.bind(this)}" 
-                @error="${this.onImageError.bind(this)}" />
+                src="" 
+                alt="" 
+                loading="lazy" />
               
               <!-- Overlaid state info at bottom -->
               ${showState ? `
                 <div class="state-info-overlay">
-                  <div class="bottom-left">${title}: ${attributes.event_type || 'Motion'}</div>
-                  <div class="bottom-right">${attributes.timestamp || ''}</div>
+                  <div class="bottom-left"></div>
+                  <div class="bottom-right"></div>
                 </div>
               ` : ''}
               
@@ -295,22 +304,14 @@ class ReolinkRecordingCard extends HTMLElement {
       
       // Flag that we've rendered the card structure
       this.cardRendered = true;
+
+      this._applyMediaContent(imageUrl, videoUrl, attributes, title, showState);
       
       // Add event listeners for image loading
       const img = this.shadowRoot.querySelector('.reolink-image');
       if (img) {
         img.addEventListener('load', this.onImageLoaded.bind(this));
         img.addEventListener('error', this.onImageError.bind(this));
-      }
-      
-      // Add click handler
-      if (videoUrl) {
-        const card = this.shadowRoot.querySelector('.image-container');
-        if (card) {
-          card.addEventListener('click', () => {
-            this.handleTap(videoUrl);
-          });
-        }
       }
       
       // Set up auto-refresh
@@ -327,6 +328,33 @@ class ReolinkRecordingCard extends HTMLElement {
       
       // Render a helpful error message instead of letting Home Assistant show "Configuration error"
       this.renderError(`Render failed: ${error.message}. Check console for details.`);
+    }
+  }
+
+  _applyMediaContent(imageUrl, videoUrl, attributes, title, showState) {
+    const img = this.shadowRoot?.querySelector('.reolink-image');
+    if (img && isSafeMediaUrl(imageUrl)) {
+      img.src = imageUrl;
+      img.alt = title;
+    }
+
+    if (showState && attributes) {
+      const titleEl = this.shadowRoot?.querySelector('.bottom-left');
+      const timestampEl = this.shadowRoot?.querySelector('.bottom-right');
+
+      if (titleEl) {
+        titleEl.textContent = `${title}: ${attributes.event_type || 'Motion'}`;
+      }
+      if (timestampEl) {
+        timestampEl.textContent = attributes.timestamp || '';
+      }
+    }
+
+    if (videoUrl) {
+      const card = this.shadowRoot?.querySelector('.image-container');
+      if (card) {
+        card.onclick = () => this.handleTap(videoUrl);
+      }
     }
   }
 
@@ -349,10 +377,11 @@ class ReolinkRecordingCard extends HTMLElement {
       
       // Update image source
       const img = this.shadowRoot?.querySelector('.reolink-image');
-      if (img) {
+      if (img && isSafeMediaUrl(imageUrl)) {
         console.log(`Reolink Card: Updating image source for ${title}`);
         img.src = imageUrl;
-      } else {
+        img.alt = title;
+      } else if (!img) {
         console.warn('Reolink Card: Could not find image element to update');
       }
       
@@ -406,16 +435,24 @@ class ReolinkRecordingCard extends HTMLElement {
 
   renderError(message) {
     this.shadowRoot.innerHTML = `
+      <style>
+        .error-message {
+          padding: 16px;
+          color: var(--error-color);
+        }
+      </style>
       <ha-card>
-        <div style="padding: 16px; color: var(--error-color)">
-          ${message}
-        </div>
+        <div class="error-message"></div>
       </ha-card>
     `;
+    const errorEl = this.shadowRoot.querySelector('.error-message');
+    if (errorEl) {
+      errorEl.textContent = message;
+    }
   }
 
   handleTap(mediaUrl) {
-    if (!mediaUrl) return;
+    if (!mediaUrl || !isSafeMediaUrl(mediaUrl)) return;
 
     const action = this._config.tap_action || { action: 'url' };
     

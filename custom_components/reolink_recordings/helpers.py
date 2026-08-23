@@ -1,7 +1,13 @@
 """Shared helpers for the Reolink Recordings integration."""
+import logging
 from pathlib import Path
 
+import aiohttp
+
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def resolve_storage_path(hass: HomeAssistant, storage_path: str) -> Path:
@@ -54,5 +60,43 @@ def validate_storage_path(hass: HomeAssistant, storage_path: str) -> str | None:
         resolve_storage_path(hass, storage_path).resolve().relative_to(config_root)
     except (ValueError, OSError):
         return "invalid_storage_path"
+
+    return None
+
+
+async def validate_ha_credentials(
+    hass: HomeAssistant, host: str, access_token: str
+) -> str | None:
+    """Validate Home Assistant URL and long-lived access token.
+
+    Returns an error key (``invalid_auth`` or ``cannot_connect``) or None if valid.
+    """
+    host = host.strip()
+    access_token = access_token.strip()
+    if not host or not access_token:
+        return "invalid_auth"
+
+    session = async_get_clientsession(hass)
+    url = f"{host.rstrip('/')}/api/"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with session.get(
+            url,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as response:
+            if response.status == 401:
+                return "invalid_auth"
+            if response.status >= 400:
+                _LOGGER.debug(
+                    "Credential validation failed with HTTP %s for %s",
+                    response.status,
+                    url,
+                )
+                return "cannot_connect"
+    except (TimeoutError, aiohttp.ClientError, OSError) as err:
+        _LOGGER.debug("Credential validation failed for %s: %s", url, err)
+        return "cannot_connect"
 
     return None

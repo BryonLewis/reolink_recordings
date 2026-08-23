@@ -220,7 +220,7 @@ trigger:
     event_type: reolink_recordings_updated
 ```
 
-Event data may include: `camera`, `event_type`, `date`, `timestamp`, `duration`, `recording_id`, and `file_path`.
+Event data may include: `camera`, `event_type`, `date`, `timestamp`, `duration`, `recording_id`, and `file_name`.
 
 #### Example: notify when a person is detected
 
@@ -267,8 +267,7 @@ Each sensor has these attributes:
 - `timestamp`: The recording time (e.g., "17:21:21")
 - `duration`: The recording duration (e.g., "0:00:12")
 - `event_type`: The detected event type (e.g., "Motion", "Motion Person", "Vehicle", "Animal")
-- `file_path`: Full path to the recording file
-- `file_name`: Name of the recording file
+- `file_name`: Name of the recording file (filename only; full filesystem paths are not exposed)
 - `media_url`: Authenticated URL to access the MP4 recording (via `/media-source/reolink_recordings/...`)
 - `entity_picture`: Authenticated URL to the snapshot image (GIF or JPG based on configuration)
 - `jpg_picture`: Authenticated URL to the JPG snapshot (when using both GIF and JPG format)

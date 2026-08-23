@@ -12,7 +12,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Unable to connect or validate configuration"
+      "cannot_connect": "Unable to connect to Home Assistant at the given URL",
+      "invalid_auth": "Invalid long-lived access token"
     }
   },
   "options": {
