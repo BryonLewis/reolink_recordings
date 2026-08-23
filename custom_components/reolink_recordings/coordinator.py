@@ -758,7 +758,7 @@ class ReolinkRecordingsCoordinator:
                     timestamp=camera_data.get("timestamp"),
                     duration=camera_data.get("duration"),
                     recording_id=recording_id,
-                    file_path=str(dest_path)
+                    file_name=dest_path.name,
                 )
                 
             except asyncio.CancelledError:
@@ -1158,7 +1158,7 @@ class ReolinkRecordingsCoordinator:
         timestamp: str = None,
         duration: str = None,
         recording_id: str = None,
-        file_path: str = None,
+        file_name: str = None,
     ):
         """Fire an event when a recording is updated."""
         event_data = {
@@ -1168,7 +1168,7 @@ class ReolinkRecordingsCoordinator:
             "timestamp": timestamp,
             "duration": duration,
             "recording_id": recording_id,
-            "file_path": file_path,
+            "file_name": file_name,
         }
         
         # Remove None values

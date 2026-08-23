@@ -240,7 +240,7 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
                         break
             
             if recording_path:
-                attributes["file_path"] = recording_path
+                # Expose filename only — never the full filesystem path
                 attributes["file_name"] = self._video_filename
                 
                 # Media URL (MP4) for tap-to-play via authenticated media source

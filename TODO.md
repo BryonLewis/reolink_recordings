@@ -24,7 +24,7 @@ Items identified during a security review of this repository.
   - `frontend/reolink-recording-card.js` and `frontend/reolink-summary-card.js` inject entity data (camera names, event types, timestamps) into `innerHTML` without escaping.
   - **Fix:** Use `textContent`, DOM APIs, or an HTML-escape helper for all dynamic values.
 
-- [ ] **Remove filesystem path from public entity attributes** (`sensor.py`)
+- [x] **Remove filesystem path from public entity attributes** (`sensor.py`)
   - `file_path` exposes the full local path in `extra_state_attributes`.
   - **Fix:** Remove `file_path` from attributes or expose only the filename / media-source identifier.
 
@@ -104,6 +104,4 @@ Consider extending `validate.yml` with HACS validation and optional Bandit, and 
 
 ### What CI will not catch
 
-These require code changes from the security section above, not automation alone:
-
-- Removing `file_path` from public entity attributes
+These require code changes from the security section above, not automation alone. Remaining items are tracked under Medium/Low Priority above.
