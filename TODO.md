@@ -20,7 +20,7 @@ Items identified during a security review of this repository.
   - Setup accepts any host/username/password without verifying the long-lived access token works.
   - **Fix:** Test the token against HA's WebSocket or REST API during `async_step_user` before creating the config entry.
 
-- [ ] **Fix XSS risk in custom Lovelace cards**
+- [x] **Fix XSS risk in custom Lovelace cards**
   - `frontend/reolink-recording-card.js` and `frontend/reolink-summary-card.js` inject entity data (camera names, event types, timestamps) into `innerHTML` without escaping.
   - **Fix:** Use `textContent`, DOM APIs, or an HTML-escape helper for all dynamic values.
 
@@ -106,5 +106,4 @@ Consider extending `validate.yml` with HACS validation and optional Bandit, and 
 
 These require code changes from the security section above, not automation alone:
 
-- XSS in custom cards (ESLint helps only with rules that catch unsafe `innerHTML` usage)
 - Removing `file_path` from public entity attributes

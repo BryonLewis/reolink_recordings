@@ -5,6 +5,17 @@
  * sorts them by recency, and displays them dynamically.
  * Recording media URLs are served via authenticated /media-source/ paths.
  */
+
+function isSafeMediaUrl(url) {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return (
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://')
+  );
+}
+
 class ReolinkSummaryCard extends HTMLElement {
   static getConfigElement() {
     return document.createElement('reolink-summary-card-editor');
@@ -209,10 +220,33 @@ class ReolinkSummaryCard extends HTMLElement {
     if (recordings.length === 0) {
        if (!this.cardRendered) {
          this.shadowRoot.innerHTML = `
-           <ha-card header="${this._config.title}">
-             <div style="padding: 16px; color: var(--secondary-text-color);">No recordings found. Ensure auto-discovery is enabled or entities are specified.</div>
-           </ha-card>
+           <style>
+             .empty-message {
+               padding: 16px;
+               color: var(--secondary-text-color);
+             }
+             .title {
+               padding: 16px 16px 8px 16px;
+               font-size: 1.2rem;
+               font-weight: 500;
+               color: var(--primary-text-color);
+             }
+           </style>
+           <ha-card id="summary-card"></ha-card>
          `;
+         const card = this.shadowRoot.getElementById('summary-card');
+         if (card && this._config.title) {
+           const titleEl = document.createElement('div');
+           titleEl.className = 'title';
+           titleEl.textContent = this._config.title;
+           card.appendChild(titleEl);
+         }
+         if (card) {
+           const message = document.createElement('div');
+           message.className = 'empty-message';
+           message.textContent = 'No recordings found. Ensure auto-discovery is enabled or entities are specified.';
+           card.appendChild(message);
+         }
          this.cardRendered = true;
        }
        return;
@@ -434,13 +468,20 @@ class ReolinkSummaryCard extends HTMLElement {
         </style>
 
 
-        <ha-card>
-          ` + (this._config.title ? '<div class="title">' + this._config.title + '</div>' : '') + `
+        <ha-card id="summary-card">
           <div class="grid-container" id="recordings-container">
              <!-- Content injected dynamically -->
           </div>
         </ha-card>
       `;
+
+      const card = this.shadowRoot.getElementById('summary-card');
+      if (card && this._config.title) {
+        const titleEl = document.createElement('div');
+        titleEl.className = 'title';
+        titleEl.textContent = this._config.title;
+        card.insertBefore(titleEl, card.firstChild);
+      }
 
       this.cardRendered = true;
       this.setupAutoRefresh();
@@ -494,116 +535,168 @@ class ReolinkSummaryCard extends HTMLElement {
     return matches.length > 0 ? matches[0] : null;
   }
 
+  _createPlayIcon() {
+    const playIcon = document.createElement('div');
+    playIcon.className = 'play-icon';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M8,5.14V19.14L19,12.14L8,5.14Z');
+    svg.appendChild(path);
+    playIcon.appendChild(svg);
+    return playIcon;
+  }
+
+  _createLiveButton(index) {
+    const liveBtn = document.createElement('div');
+    liveBtn.className = 'live-btn';
+    liveBtn.id = `live-${index}`;
+    liveBtn.title = 'View Live Camera';
+
+    const liveIcon = document.createElement('div');
+    liveIcon.className = 'live-icon';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute(
+      'd',
+      'M17,10.5V7A1,1 0 0,0 16,6H4A1,1 0 0,0 3,7V17A1,1 0 0,0 4,18H16A1,1 0 0,0 17,17V13.5L21,17.5V6.5L17,10.5Z'
+    );
+    svg.appendChild(path);
+    liveIcon.appendChild(svg);
+    liveBtn.appendChild(liveIcon);
+
+    const label = document.createElement('span');
+    label.textContent = 'View Live';
+    liveBtn.appendChild(label);
+    return liveBtn;
+  }
+
+  _createRecordingItem(rec, index, isHero) {
+    const imageUrl = this._getImageUrl(rec.attributes);
+    const videoUrl = this._getVideoUrl(rec.attributes);
+    const eventType = rec.attributes.event_type || 'Motion';
+    const timestamp = rec.attributes.timestamp || '';
+    const timeAgo = this._timeSince(rec.dateObj);
+
+    let cleanName = rec.name.replace(/latest recording/i, '').replace(/_latest_recording/i, '').trim();
+    if (!cleanName) {
+      cleanName = rec.entityId.replace('sensor.', '').replace('_latest_recording', '');
+    }
+
+    if (cleanName.includes('_')) {
+      cleanName = cleanName.split('_')
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    } else if (cleanName === cleanName.toLowerCase()) {
+      cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+    }
+
+    const cameraEntity = this._findLiveCamera(cleanName);
+    const item = document.createElement('div');
+    item.className = isHero ? 'hero-item' : 'secondary-item';
+    item.id = `rec-${index}`;
+
+    if (cameraEntity) {
+      item.appendChild(this._createLiveButton(index));
+    }
+
+    const relativeTime = document.createElement('div');
+    relativeTime.className = 'relative-time';
+    relativeTime.textContent = timeAgo;
+    item.appendChild(relativeTime);
+
+    if (imageUrl && isSafeMediaUrl(imageUrl)) {
+      const img = document.createElement('img');
+      img.src = imageUrl;
+      img.alt = cleanName;
+      img.loading = 'lazy';
+      item.appendChild(img);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.style.height = '100%';
+      placeholder.style.display = 'flex';
+      placeholder.style.alignItems = 'center';
+      placeholder.style.justifyContent = 'center';
+      placeholder.style.color = '#ccc';
+      placeholder.textContent = 'No Image';
+      item.appendChild(placeholder);
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay-bottom';
+
+    const camName = document.createElement('div');
+    camName.className = 'cam-name';
+    camName.textContent = cleanName;
+    overlay.appendChild(camName);
+
+    const eventMeta = document.createElement('div');
+    eventMeta.className = 'event-meta';
+
+    const eventTypeEl = document.createElement('span');
+    eventTypeEl.textContent = eventType;
+    eventMeta.appendChild(eventTypeEl);
+
+    const timestampEl = document.createElement('span');
+    timestampEl.textContent = timestamp;
+    eventMeta.appendChild(timestampEl);
+
+    overlay.appendChild(eventMeta);
+    item.appendChild(overlay);
+    item.appendChild(this._createPlayIcon());
+
+    if (videoUrl) {
+      item.addEventListener('click', () => {
+        this._openModal(videoUrl, cleanName, timestamp);
+      });
+    }
+
+    const liveEl = item.querySelector(`#live-${index}`);
+    if (liveEl && cameraEntity) {
+      liveEl.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.dispatchEvent(new CustomEvent('hass-more-info', {
+          detail: { entityId: cameraEntity },
+          bubbles: true,
+          composed: true,
+        }));
+      });
+    }
+
+    return item;
+  }
+
   _updateContent(recordings) {
     const container = this.shadowRoot.getElementById('recordings-container');
     if (!container) return;
 
-    let html = '';
-    const clickHandlers = [];
+    container.replaceChildren();
+
+    let secondaryGrid = null;
 
     recordings.forEach((rec, index) => {
-      const isHero = index === 0; // First item is the hero
-      const imageUrl = this._getImageUrl(rec.attributes);
-      const videoUrl = this._getVideoUrl(rec.attributes);
-      const eventType = rec.attributes.event_type || 'Motion';
-      const timestamp = rec.attributes.timestamp || '';
-      const timeAgo = this._timeSince(rec.dateObj);
-      
-      // Look up live camera using the clean camera name (e.g. "Pole Barn")
-      let cleanName = rec.name.replace(/latest recording/i, '').replace(/_latest_recording/i, '').trim();
-      if (!cleanName) cleanName = rec.entityId.replace('sensor.', '').replace('_latest_recording', '');
-      
-      // Make it beautiful for display (e.g., "first_landing" -> "First Landing")
-      if (cleanName.includes('_')) {
-        cleanName = cleanName.split('_')
-          .filter(Boolean)
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
-      }
-      // Also capitalize first letter if purely lowercase
-      else if (cleanName === cleanName.toLowerCase()) {
-        cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-      }
-      
-      const cameraEntity = this._findLiveCamera(cleanName);
-      
-      clickHandlers.push({
-        id: `rec-${index}`,
-        liveId: `live-${index}`,
-        index: index,
-        url: videoUrl,
-        entity: rec.entityId,
-        title: cleanName,
-        timestamp: timestamp,
-        cameraEntity: cameraEntity
-      });
-
-      const elementClass = isHero ? 'hero-item' : 'secondary-item';
-      
-      const liveBtnHtml = cameraEntity ? `
-        <div class="live-btn" id="live-` + index + `" title="View Live Camera">
-          <div class="live-icon"><svg viewBox="0 0 24 24"><path d="M17,10.5V7A1,1 0 0,0 16,6H4A1,1 0 0,0 3,7V17A1,1 0 0,0 4,18H16A1,1 0 0,0 17,17V13.5L21,17.5V6.5L17,10.5Z"/></svg></div>
-          <span>View Live</span>
-        </div>` : '';
-      
-      const itemHtml = `
-        <div class="` + elementClass + `" id="rec-` + index + `">
-          ` + liveBtnHtml + `
-          <div class="relative-time">` + timeAgo + `</div>
-          ` + (imageUrl ? '<img src="' + imageUrl + '" alt="' + cleanName + '" loading="lazy"/>' : '<div style="height:100%; display:flex; align-items:center; justify-content:center; color:#ccc;">No Image</div>') + `
-          <div class="overlay-bottom">
-            <div class="cam-name">` + cleanName + `</div>
-            <div class="event-meta">
-              <span>` + eventType + `</span>
-              <span>` + timestamp + `</span>
-            </div>
-          </div>
-          <div class="play-icon">
-            <svg viewBox="0 0 24 24"><path d="M8,5.14V19.14L19,12.14L8,5.14Z" /></svg>
-          </div>
-        </div>
-      `;
+      const isHero = index === 0;
+      const item = this._createRecordingItem(rec, index, isHero);
 
       if (isHero) {
-        html += itemHtml;
+        container.appendChild(item);
         if (recordings.length > 1) {
-          html += '<div class="secondary-grid">';
+          secondaryGrid = document.createElement('div');
+          secondaryGrid.className = 'secondary-grid';
+          container.appendChild(secondaryGrid);
         }
+      } else if (secondaryGrid) {
+        secondaryGrid.appendChild(item);
       } else {
-        html += itemHtml;
-      }
-    });
-
-    if (recordings.length > 1) {
-      html += '</div>'; // Close secondary grid
-    }
-
-    container.innerHTML = html;
-
-    // Attach click listeners
-    clickHandlers.forEach(handler => {
-      const el = this.shadowRoot.getElementById(handler.id);
-      if (el && handler.url) {
-        el.addEventListener('click', () => {
-          this._openModal(handler.url, handler.title, handler.timestamp);
-        });
-      }
-      
-      const liveEl = this.shadowRoot.getElementById(handler.liveId);
-      if (liveEl && handler.cameraEntity) {
-        liveEl.addEventListener('click', (e) => {
-          e.stopPropagation(); // prevent modal from opening
-          const event = new CustomEvent('hass-more-info', {
-            detail: { entityId: handler.cameraEntity }, bubbles: true, composed: true
-          });
-          this.dispatchEvent(event);
-        });
+        container.appendChild(item);
       }
     });
   }
 
   _openModal(url, title, timestamp) {
-    if (!url) return;
+    if (!url || !isSafeMediaUrl(url)) return;
     
     const wrapper = document.createElement('div');
     wrapper.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); z-index: 999999; display: flex; flex-direction: column; justify-content: center; align-items: center; font-family: var(--paper-font-common-base_-_font-family, sans-serif); opacity: 0; transition: opacity 0.3s ease;';
@@ -627,7 +720,16 @@ class ReolinkSummaryCard extends HTMLElement {
     // Header
     const header = document.createElement('div');
     header.style.cssText = 'color: white; padding: 16px 20px; font-size: 1.2rem; background: #1a1a1a; display: flex; justify-content: space-between; border-bottom: 1px solid #333;';
-    header.innerHTML = '<span>' + title + '</span><span style="color: #aaa; font-size: 1rem;">' + timestamp + '</span>';
+
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = title;
+    header.appendChild(titleSpan);
+
+    const timestampSpan = document.createElement('span');
+    timestampSpan.style.color = '#aaa';
+    timestampSpan.style.fontSize = '1rem';
+    timestampSpan.textContent = timestamp;
+    header.appendChild(timestampSpan);
     
     // Video
     const video = document.createElement('video');
@@ -695,7 +797,7 @@ class ReolinkSummaryCardEditor extends HTMLElement {
   setConfig(config) { this._config = config; }
   set hass(hass) {}
   render() { 
-    this.innerHTML = `<div style="padding:16px;">Summary Card configuration currently requires YAML. Auto discovery will automatically pull in all your Reolink sensors.</div>`; 
+    this.textContent = 'Summary Card configuration currently requires YAML. Auto discovery will automatically pull in all your Reolink sensors.';
   }
 }
 
