@@ -7,7 +7,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ["frontend/**/*.js"],
+    files: ["custom_components/reolink_recordings/frontend/**/*.js"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "script",
