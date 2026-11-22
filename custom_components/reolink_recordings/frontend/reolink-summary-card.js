@@ -28,13 +28,19 @@ async function resolveMediaUrl(hass, url, { asBlob = false } = {}) {
   if (url.includes('authSig=') && !asBlob) return url;
 
   const pathOnly = url.split('?')[0];
+  // Keep the query string for blob fetches. entity_picture/media_url carry a
+  // ?t=<file-timestamp> cache-buster; dropping it makes the browser serve a
+  // heuristically-cached copy of a previous recording (stale preview while the
+  // tap-through video is current, because HA sends ETag/Last-Modified only).
+  const query = url.includes('?') ? url.slice(url.indexOf('?')) : '';
 
   try {
     if (asBlob && (pathOnly.startsWith('/api/') || url.startsWith('/api/'))) {
-      const abs = typeof hass.hassUrl === 'function' ? hass.hassUrl(pathOnly) : pathOnly;
+      const base = typeof hass.hassUrl === 'function' ? hass.hassUrl(pathOnly) : pathOnly;
+      const abs = `${base}${query}`;
       const token = hass.auth && hass.auth.data && hass.auth.data.access_token;
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const resp = await fetch(abs, { headers, credentials: 'same-origin' });
+      const resp = await fetch(abs, { headers, credentials: 'same-origin', cache: 'no-cache' });
       if (!resp.ok) {
         throw new Error(`media fetch HTTP ${resp.status}`);
       }
